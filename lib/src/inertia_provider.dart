@@ -6,12 +6,12 @@ import 'inertia_config.dart';
 /// Sets up Inertia in every isolate. Extend it in `lib/` so the
 /// generated container finds it.
 /// ```
-/// class AppInertiaService extends InertiaService {
-///   AppInertiaService() : super(inertiaConfig);
+/// class AppInertiaProvider extends InertiaProvider {
+///   AppInertiaProvider() : super(inertiaConfig);
 /// }
 /// ```
-class InertiaService implements DoxService {
-  InertiaService(this.config);
+class InertiaProvider extends DoxProvider {
+  InertiaProvider(this.config);
 
   final InertiaConfig config;
 

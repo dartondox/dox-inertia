@@ -1,3 +1,7 @@
+## 3.0.0-alpha.4
+
+- `InertiaProvider` (was a DoxService): extend it in your app, `shutdown()` is optional.
+
 ## 3.0.0-alpha.3
 
 - Needs `dox_core` 3.0.0-alpha.11 (sessions and CSRF).

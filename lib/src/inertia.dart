@@ -165,7 +165,7 @@ class Inertia {
   static final Expando<Map<String, dynamic>> _shared =
       Expando<Map<String, dynamic>>();
 
-  /// Use [config] in this isolate. `InertiaService` calls it.
+  /// Use [config] in this isolate. `InertiaProvider` calls it.
   /// With no call, the defaults of `InertiaConfig` are used.
   static void configure(InertiaConfig config) {
     _config = config;
