@@ -38,16 +38,16 @@ Future<DoxResponse> inertia(
     return Inertia.location(req, '${req.scheme()}://${req.host()}$url');
   }
 
+  Map<String, dynamic> shared = Inertia.shared(req);
   Map<String, dynamic> page = <String, dynamic>{
     'component': component,
     'url': url,
     'version': version,
     'clearHistory': false,
     'encryptHistory': false,
-    ...await _props(req, component, <String, dynamic>{
-      ...Inertia.shared(req),
-      ...props,
-    }),
+    ...await _props(req, component, <String, dynamic>{...shared, ...props}),
+    // the client keeps these props on an instant visit
+    if (shared.isNotEmpty) 'sharedProps': shared.keys.toList(),
   };
 
   if (isInertia) {
@@ -58,16 +58,28 @@ Future<DoxResponse> inertia(
 
   InertiaConfig config = Inertia.config;
   String root = await File(config.rootView).readAsString();
-  String json = jsonEncode(page, toEncodable: _toJson);
-  String data = const HtmlEscape(HtmlEscapeMode.attribute).convert(json);
   // @vite first: a prop can hold the text "@vite", the tags can not
   // hold "@inertia"
   String html = root
       .replaceFirst('@vite', await Vite(config).tags())
-      .replaceFirst('@inertia', '<div id="app" data-page="$data"></div>');
+      .replaceFirst('@inertia', _root(page));
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
+}
+
+/// The HTML of `@inertia` for Inertia v3: the [page] as JSON in a
+/// `<script data-page="app">` tag, then the `<div id="app">` the app
+/// renders into.
+String _root(Map<String, dynamic> page) {
+  // `<`, `>` and `&` only appear inside JSON strings, so the \u escapes
+  // keep the same data. With no `<`, a prop can not end the script tag.
+  String json = jsonEncode(page, toEncodable: _toJson)
+      .replaceAll('<', r'\u003c')
+      .replaceAll('>', r'\u003e')
+      .replaceAll('&', r'\u0026');
+  return '<script data-page="app" type="application/json">$json</script>'
+      '<div id="app"></div>';
 }
 
 /// `props`, plus `deferredProps` and `mergeProps` when there are any

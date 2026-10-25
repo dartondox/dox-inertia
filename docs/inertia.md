@@ -5,7 +5,7 @@ Inertia lets you build a single page app with React, Vue or Svelte, and keep rou
 You do not write an API. A controller gives a page name and its props. Inertia shows the page in the browser.
 The first visit gets a full HTML page. After that, links and forms get only JSON, and the page changes without a reload.
 
-The `dox_inertia` package is the server side of Inertia (protocol v2). Use it with the Inertia client for your front-end (`@inertiajs/react`, `@inertiajs/vue3` or `@inertiajs/svelte`) and Vite.
+The `dox_inertia` package is the server side of Inertia. Use it with the Inertia 3 client for your front-end (`@inertiajs/react`, `@inertiajs/vue3` or `@inertiajs/svelte`, version 3) and Vite.
 
 ## Install
 
@@ -34,7 +34,13 @@ The root view is the HTML page of the first visit. Dox puts the script and style
 </html>
 ```
 
-`@inertia` becomes `<div id="app" data-page="..."></div>`. The page data is HTML-escaped.
+`@inertia` becomes the page data and the element the app renders into:
+
+```html
+<script data-page="app" type="application/json">{"component":"Home",...}</script><div id="app"></div>
+```
+
+This is the format of the Inertia 3 client. In the JSON, `<`, `>` and `&` are written as `\u003c`, `\u003e` and `\u0026`, so a prop can not end the script tag.
 
 ### 2. Config
 
@@ -89,6 +95,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ command }) => ({
   plugins: [react()],
+  // public/ holds the Dox public files. The build goes into public/build,
+  // so do not let Vite copy public/ into the build.
+  publicDir: false,
   // the built files are served from /build/
   base: command === 'build' ? '/build/' : '/',
   server: { origin: 'http://localhost:5173' },
@@ -184,6 +193,7 @@ class WebRouter extends Router {
 ```
 
 A page prop with the same name wins over a shared prop. `share` can be `async`.
+The page lists the names of the shared props in `sharedProps`. The client keeps them on an instant visit.
 You can also share from any middleware or controller with `Inertia.share(req, {...})`.
 
 ## Partial reloads
@@ -266,6 +276,10 @@ Each page has a version. When you deploy new assets, the version changes. A brow
 The default version is a hash of the Vite manifest. Dox reads it once per isolate, so restart the server after `vite build` (a deploy does this). To set your own, use `version` in the config, eg. the git commit.
 
 ## Not included
+
+- The Inertia 1 and 2 clients. They read the page from `<div id="app" data-page="...">`. Use the Inertia 3 client.
+- Flash data (`flash`), once props, scroll props (infinite scroll), `prependProps`, `deepMergeProps` and `matchPropsOn`.
+- Partial reloads of nested props with dots, like `only: ['auth.user']`. Ask for the top level prop (`auth`).
 
 - Server side rendering (SSR).
 - Validation errors and flash messages through the session. Dox has no session. To show errors, catch the `ValidationException` and render the page again with an `errors` prop.

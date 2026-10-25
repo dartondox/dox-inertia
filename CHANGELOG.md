@@ -1,3 +1,11 @@
+## 3.0.0-alpha.2
+
+- Works with the Inertia 3 client (`@inertiajs/react` 3 and others). Before, the app did not start, because the client could not find the first page.
+- `@inertia` now writes `<script data-page="app" type="application/json">...</script><div id="app"></div>`, not `<div id="app" data-page="...">`. In the JSON, `<`, `>` and `&` are escaped, so a prop can not end the script tag.
+- The Inertia 1 and 2 clients are not supported any more.
+- The page has `sharedProps`: the names of the shared props. The client keeps them on an instant visit.
+- Docs: `publicDir: false` in the `vite.config.js` sample, so Vite does not copy `public/` into `public/build`.
+
 ## 3.0.0-alpha.1
 
 - First version.

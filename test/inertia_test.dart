@@ -94,24 +94,28 @@ void main() {
   });
 
   group('first visit', () {
-    test('gives HTML with the page in data-page', () async {
+    test('gives HTML with the page in a script tag (Inertia v3)', () async {
       TestResponse res = await client.get('/users?page=2');
       res
           .expectStatus(200)
           .expectHeader('content-type', contains('text/html'))
           .expectHeader('vary', 'X-Inertia');
-      RegExpMatch match = RegExp(r'<div id="app" data-page="([^"]*)"></div>')
-          .firstMatch(res.body)!;
+      RegExpMatch match = RegExp(
+        r'<script data-page="app" type="application/json">(.*?)</script>'
+        r'<div id="app"></div>',
+      ).firstMatch(res.body)!;
       String raw = match[1]!;
+      // a prop can not close the script tag or open a comment
       expect(raw, isNot(contains('<')));
       expect(raw, isNot(contains('>')));
-      Map<String, dynamic> page =
-          jsonDecode(_unescape(raw)) as Map<String, dynamic>;
+      expect(raw, isNot(contains('&')));
+      Map<String, dynamic> page = jsonDecode(raw) as Map<String, dynamic>;
       expect(page['component'], 'Users/Index');
       expect(page['url'], '/users?page=2');
       expect(page['version'], '1');
       expect(page['clearHistory'], false);
       expect(page['encryptHistory'], false);
+      expect(page['sharedProps'], <String>['app', 'title']);
       Map<String, dynamic> props = page['props'] as Map<String, dynamic>;
       expect(
         props['html'],
@@ -145,6 +149,7 @@ void main() {
       TestResponse res = await client.get('/users', headers: inertiaHeaders);
       expect(res.json['props']['app'], 'Dox');
       expect(res.json['props']['title'], 'Users');
+      expect(res.json['sharedProps'], <String>['app', 'title']);
     });
 
     test('leaves out optional and deferred props, lists deferred', () async {
@@ -275,13 +280,4 @@ void main() {
           .expectHeader('location', 'https://example.com/pay');
     });
   });
-}
-
-String _unescape(String text) {
-  return text
-      .replaceAll('&quot;', '"')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&#39;', "'")
-      .replaceAll('&amp;', '&');
 }

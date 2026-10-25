@@ -1,6 +1,6 @@
 name: dox_inertia
 description: "Inertia.js for the Dox framework: build single page apps with React, Vue or Svelte and Dox controllers, with no API to write."
-version: 3.0.0-alpha.1
+version: 3.0.0-alpha.2
 repository: https://github.com/dartondox/dox-inertia
 homepage: https://dartondox.dev
 
