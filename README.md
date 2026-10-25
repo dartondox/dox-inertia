@@ -150,6 +150,29 @@ Route.get('/build/{path*}', (String path) {
 });
 ```
 
+### 6. Middleware
+
+Add three middleware to `globalMiddleware`, in this order:
+
+`lib/config/app.dart`:
+
+```dart
+AppConfig appConfig = AppConfig(
+  globalMiddleware: <dynamic>[
+    const SessionMiddleware(),
+    const CsrfMiddleware(),
+    HandleInertiaRequests(),
+  ],
+  // ...
+);
+```
+
+- `SessionMiddleware` gives each request a session. Inertia uses it for validation errors and flash data.
+- `CsrfMiddleware` stops cross site form posts. It sets the `XSRF-TOKEN` cookie. The Inertia client reads it and sends it back in the `X-XSRF-TOKEN` header. You do not write any code for this.
+- `HandleInertiaRequests` is your `InertiaMiddleware`, see [Shared props](#shared-props). With no props to share, use `const InertiaMiddleware()`.
+
+You can also add them to a router, in the same order, if only some routes are Inertia pages.
+
 ## Render a page
 
 Give the request, the page name and the props. The page name is the file in `resources/js/Pages`, without the extension.
@@ -179,7 +202,7 @@ Props become JSON. A model or any object with `toJson()` works. A `DateTime` bec
 
 ## Shared props
 
-Shared props go to every page, like the signed in user or the app name. Extend `InertiaMiddleware` and add it to a router or to `globalMiddleware`.
+Shared props go to every page, like the signed in user or the app name. Extend `InertiaMiddleware` and add it to `globalMiddleware` (see [Middleware](#6-middleware)).
 
 `lib/app/http/middleware/handle_inertia_requests.dart`:
 
@@ -194,20 +217,6 @@ class HandleInertiaRequests extends InertiaMiddleware {
       'appName': 'My app',
       'auth': () => req.auth?.toJson(),
     };
-  }
-}
-```
-
-`lib/routes/web.dart`:
-
-```dart
-class WebRouter extends Router {
-  @override
-  List<dynamic> get middleware => <dynamic>[HandleInertiaRequests()];
-
-  @override
-  void register() {
-    Route.get('/users', (UserController c) => c.index);
   }
 }
 ```
@@ -228,7 +237,7 @@ return inertia(req, 'Users/Index', <String, dynamic>{
   'stats': Inertia.optional(() => Stats.load()),
 
   /// on every request, also on a partial reload that does not ask for it
-  'errors': Inertia.always(<String, String>{}),
+  'notices': Inertia.always(notices),
 
   /// not on the first visit: the page loads it right after
   'comments': Inertia.defer(() => Comment().query().all()),
@@ -249,14 +258,50 @@ return inertia(req, 'Users/Index', <String, dynamic>{
 
 Deferred props of the same `group` load in one request. The default group is `default`.
 
+## Forms and validation errors
+
+A form post needs no extra code for errors. The flow is:
+
+1. The page posts the form: `router.post('/users', data)` or `useForm`.
+2. The controller validates. The validation fails.
+3. Dox flashes the errors and the old input to the session, and redirects back.
+4. The page loads again. It gets the errors in the `errors` prop.
+
+```dart
+Future<DoxResponse> store(DoxRequest req) async {
+  await req.validateSchema(
+    v.object(<String, Schema<Object?>>{
+      'name': v.string().min(2),
+      'email': v.string().email(),
+    }),
+  );
+  // ... save the user
+  return redirect('/users');
+}
+```
+
+```jsx
+const { data, setData, post, errors } = useForm({ name: '', email: '' })
+// errors.email holds the message, or is undefined
+```
+
+Every page gets `errors`. It is `{}` when there are no errors. It is sent on every request, also on a partial reload.
+The old input is in `req.session.old('email')`. Password fields are not kept.
+
+With `router.post(url, data, { errorBag: 'login' })` or `form.post(url, { errorBag: 'login' })`, the client sends the `X-Inertia-Error-Bag` header. Then the errors are under the bag name: `errors.login.email`. Use it when one page has two forms.
+
+You do not need to pass `errors` yourself. A page prop named `errors` still wins.
+
 ## Redirects
 
-After a form, redirect with `Inertia.redirect`. After `PUT`, `PATCH` or `DELETE`, an Inertia request gets `303`, so the browser follows it with `GET`. Other requests get `302`.
+After a form, redirect with `redirect(url)` or `back(req)` from Dox.
+
+After `PUT`, `PATCH` or `DELETE`, the browser must follow the redirect with `GET`, not with the same method. So `InertiaMiddleware` turns a `302` into `303` for these Inertia requests. You do not need to do anything.
 
 ```dart
 Future<DoxResponse> update(DoxRequest req, int id) async {
   // ... save the user
-  return Inertia.redirect(req, '/users');
+  return redirect('/users'); // 303 for an Inertia PUT
 }
 ```
 
@@ -265,6 +310,28 @@ To go to an outside site, or any page that is not an Inertia page, use `Inertia.
 ```dart
 return Inertia.location(req, 'https://checkout.example.com/pay/1');
 ```
+
+## Flash data
+
+Flash data is a short message for the next page, like "User saved". Use `Inertia.flash`. The next page gets it in `page.flash`, once.
+
+```dart
+Future<DoxResponse> store(DoxRequest req) async {
+  // ... save the user
+  Inertia.flash(req, 'message', 'User saved');
+  return redirect('/users');
+}
+```
+
+```jsx
+import { usePage } from '@inertiajs/react'
+
+const { flash } = usePage()
+// flash.message is 'User saved'
+```
+
+The client also fires a `flash` event, and calls the `onFlash` callback of the visit.
+`Inertia.flash` needs `SessionMiddleware`.
 
 ## Vite
 
@@ -300,9 +367,7 @@ The default version is a hash of the Vite manifest. Dox reads it once per isolat
 ## Not included
 
 - The Inertia 1 and 2 clients. They read the page from `<div id="app" data-page="...">`. Use the Inertia 3 client.
-- Flash data (`flash`), once props, scroll props (infinite scroll), `prependProps`, `deepMergeProps` and `matchPropsOn`.
+- Once props, scroll props (infinite scroll), `prependProps`, `deepMergeProps` and `matchPropsOn`.
 - Partial reloads of nested props with dots, like `only: ['auth.user']`. Ask for the top level prop (`auth`).
-
 - Server side rendering (SSR).
-- Validation errors and flash messages through the session. Dox has no session. To show errors, catch the `ValidationException` and render the page again with an `errors` prop.
 - History encryption. `encryptHistory` and `clearHistory` are always `false`.

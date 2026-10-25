@@ -39,15 +39,21 @@ Future<DoxResponse> inertia(
   }
 
   Map<String, dynamic> shared = Inertia.shared(req);
+  Object? flash = req.hasSession ? req.session.pull(Inertia.flashKey) : null;
   Map<String, dynamic> page = <String, dynamic>{
     'component': component,
     'url': url,
     'version': version,
     'clearHistory': false,
     'encryptHistory': false,
-    ...await _props(req, component, <String, dynamic>{...shared, ...props}),
+    ...await _props(req, component, <String, dynamic>{
+      if (req.hasSession) 'errors': AlwaysProp(_errors(req)),
+      ...shared,
+      ...props,
+    }),
     // the client keeps these props on an instant visit
     if (shared.isNotEmpty) 'sharedProps': shared.keys.toList(),
+    if (flash is Map && flash.isNotEmpty) 'flash': flash,
   };
 
   if (isInertia) {
@@ -66,6 +72,15 @@ Future<DoxResponse> inertia(
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
+}
+
+/// The flashed validation errors, `{}` when there are none. With the
+/// `X-Inertia-Error-Bag` header they are under the name of the bag.
+Map<String, dynamic> _errors(DoxRequest req) {
+  Map<String, dynamic> errors = req.session.errors;
+  String? bag = req.header('X-Inertia-Error-Bag');
+  if (errors.isEmpty || bag == null || bag.isEmpty) return errors;
+  return <String, dynamic>{bag: errors};
 }
 
 /// The HTML of `@inertia` for Inertia v3: the [page] as JSON in a
@@ -216,14 +231,21 @@ class Inertia {
     return response('').statusCode(302).header(HttpHeaders.locationHeader, url);
   }
 
-  /// Redirect to [url]. After PUT, PATCH or DELETE an Inertia request gets
-  /// `303`, so the browser follows it with GET. Others get `302`.
-  static DoxResponse redirect(DoxRequest req, String url) {
-    bool seeOther =
-        isInertia(req) &&
-        const <String>['PUT', 'PATCH', 'DELETE'].contains(req.method);
-    return response('')
-        .statusCode(seeOther ? 303 : 302)
-        .header(HttpHeaders.locationHeader, url);
+  /// The session key of the data from [flash].
+  static const String flashKey = '_inertia_flash';
+
+  /// Send [value] as `flash[key]` with the next page, eg. after a
+  /// redirect. The page reads it from `page.flash`. It is sent once.
+  /// Needs `SessionMiddleware`.
+  /// ```
+  /// Inertia.flash(req, 'message', 'User saved');
+  /// return redirect('/users');
+  /// ```
+  static void flash(DoxRequest req, String key, Object? value) {
+    Object? data = req.session.get(flashKey);
+    req.session.flash(flashKey, <String, dynamic>{
+      if (data is Map) ...data.cast<String, dynamic>(),
+      key: value,
+    });
   }
 }

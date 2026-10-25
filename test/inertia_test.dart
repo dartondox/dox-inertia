@@ -46,19 +46,74 @@ class InertiaRouter extends Router {
     Route.get('/away', (DoxRequest req) {
       return Inertia.location(req, 'https://example.com/pay');
     });
-    Route.post('/users', (DoxRequest req) {
-      return Inertia.redirect(req, '/users');
-    });
-    Route.put('/users', (DoxRequest req) {
-      return Inertia.redirect(req, '/users');
-    });
-    Route.patch('/users', (DoxRequest req) {
-      return Inertia.redirect(req, '/users');
-    });
-    Route.delete('/users', (DoxRequest req) {
-      return Inertia.redirect(req, '/users');
+    Route.post('/users', (DoxRequest req) => redirect('/users'));
+    Route.put('/users', (DoxRequest req) => redirect('/users'));
+    Route.patch('/users', (DoxRequest req) => redirect('/users'));
+    Route.delete('/users', (DoxRequest req) => redirect('/users'));
+    Route.get('/no-session', (DoxRequest req) {
+      return inertia(req, 'Plain');
     });
   }
+}
+
+class SessionRouter extends Router {
+  @override
+  String get prefix => 's';
+
+  @override
+  List<dynamic> get middleware => <dynamic>[
+    const SessionMiddleware(),
+    const CsrfMiddleware(),
+    ShareProps(),
+  ];
+
+  @override
+  void register() {
+    Route.get('/form', (DoxRequest req) {
+      return inertia(req, 'Form', <String, dynamic>{
+        'email': req.session.old('email'),
+      });
+    });
+    Future<DoxResponse> save(DoxRequest req) async {
+      await req.validateSchema(
+        v.object(<String, Schema<Object?>>{'email': v.string().email()}),
+      );
+      Inertia.flash(req, 'message', 'Saved');
+      return redirect('/s/form');
+    }
+
+    Route.post('/form', save);
+    Route.put('/form', save);
+  }
+}
+
+/// a client that keeps the cookies of every answer, like a browser
+class Browser {
+  Browser(this.client);
+
+  final DoxTestClient client;
+  final Map<String, String> cookies = <String, String>{};
+
+  Future<TestResponse> send(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+  }) async {
+    TestResponse res = await client
+        .withCookies(cookies)
+        .send(method, path, body: body, headers: headers);
+    cookies.addAll(res.cookies);
+    return res;
+  }
+
+  /// the headers of an Inertia POST, PUT, PATCH or DELETE, with the
+  /// token of the `XSRF-TOKEN` cookie, like axios sends it
+  Map<String, String> get formHeaders => <String, String>{
+    ...inertiaHeaders,
+    'X-XSRF-TOKEN': cookies['XSRF-TOKEN']!,
+    'Referer': '/s/form',
+  };
 }
 
 void main() {
@@ -72,7 +127,7 @@ void main() {
     client = await DoxTestClient.start(
       AppConfig(
         appKey: '4HyiSrq4N5Nfg6bOadIhbFEI8zbUkpxt',
-        routers: <Router>[InertiaRouter()],
+        routers: <Router>[InertiaRouter(), SessionRouter()],
       ),
     );
   });
@@ -278,6 +333,132 @@ void main() {
       (await client.get('/away'))
           .expectStatus(302)
           .expectHeader('location', 'https://example.com/pay');
+    });
+  });
+
+  group('session', () {
+    test('no session: no errors prop, no flash', () async {
+      TestResponse res = await client.get(
+        '/no-session',
+        headers: inertiaHeaders,
+      );
+      expect(res.json['props'], <String, dynamic>{
+        'app': 'Dox',
+        'title': 'shared',
+      });
+      expect(res.json.containsKey('flash'), false);
+      expect(res.cookies, isEmpty);
+    });
+
+    test('errors is {} when there are none', () async {
+      TestResponse res = await client.get('/s/form', headers: inertiaHeaders);
+      expect(res.json['props']['errors'], <String, dynamic>{});
+      expect(res.json.containsKey('flash'), false);
+      // errors is not a shared prop: an instant visit must not keep it
+      expect(res.json['sharedProps'], <String>['app', 'title']);
+    });
+
+    test('a POST with no CSRF token gets 419', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      TestResponse res = await browser.send(
+        'POST',
+        '/s/form',
+        body: <String, String>{'email': 'a@b.co'},
+        headers: inertiaHeaders,
+      );
+      res.expectStatus(419);
+    });
+
+    test('failed POST: redirect back, errors on the next GET', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      TestResponse post = await browser.send(
+        'POST',
+        '/s/form',
+        body: <String, String>{'email': 'nope'},
+        headers: browser.formHeaders,
+      );
+      post.expectStatus(302).expectHeader('location', '/s/form');
+
+      TestResponse page = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      Map<String, dynamic> props = page.json['props'] as Map<String, dynamic>;
+      expect((props['errors'] as Map<String, dynamic>).keys, <String>['email']);
+      expect(props['email'], 'nope');
+
+      // flashed errors last one request
+      TestResponse again = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(again.json['props']['errors'], <String, dynamic>{});
+    });
+
+    test('X-Inertia-Error-Bag puts errors under the bag name', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      Map<String, String> bag = <String, String>{
+        'X-Inertia-Error-Bag': 'login',
+      };
+      await browser.send(
+        'POST',
+        '/s/form',
+        body: <String, String>{'email': 'nope'},
+        headers: <String, String>{...browser.formHeaders, ...bag},
+      );
+      TestResponse page = await browser.send(
+        'GET',
+        '/s/form',
+        headers: <String, String>{...inertiaHeaders, ...bag},
+      );
+      Map<String, dynamic> errors =
+          page.json['props']['errors'] as Map<String, dynamic>;
+      expect(errors.keys, <String>['login']);
+      expect((errors['login'] as Map<String, dynamic>).keys, <String>['email']);
+    });
+
+    test('failed PUT: 303 back', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      TestResponse put = await browser.send(
+        'PUT',
+        '/s/form',
+        body: <String, String>{'email': 'nope'},
+        headers: browser.formHeaders,
+      );
+      put.expectStatus(303).expectHeader('location', '/s/form');
+    });
+
+    test('Inertia.flash is sent once as page.flash', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      TestResponse post = await browser.send(
+        'POST',
+        '/s/form',
+        body: <String, String>{'email': 'a@b.co'},
+        headers: browser.formHeaders,
+      );
+      post.expectStatus(302);
+
+      TestResponse page = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(page.json['flash'], <String, dynamic>{'message': 'Saved'});
+      expect(page.json['props']['errors'], <String, dynamic>{});
+
+      TestResponse again = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(again.json.containsKey('flash'), false);
     });
   });
 }

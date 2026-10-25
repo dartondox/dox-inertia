@@ -1,3 +1,13 @@
+## 3.0.0-alpha.3
+
+- Needs `dox_core` 3.0.0-alpha.11 (sessions and CSRF).
+- Breaking: `InertiaMiddleware` is now an `IDoxNextMiddleware`. It runs code after the controller too. It is not abstract any more: use `const InertiaMiddleware()` when you have no props to share.
+- `InertiaMiddleware` turns a `302` into `303` after an Inertia `PUT`, `PATCH` or `DELETE`. So the browser follows the redirect with `GET`.
+- Breaking: `Inertia.redirect` is removed. Use `redirect(url)` or `back(req)` from Dox.
+- With `SessionMiddleware`, every page gets the `errors` prop: the validation errors of the request before, or `{}`. A failed form post now shows its errors with no extra code. The `X-Inertia-Error-Bag` header puts the errors under the bag name.
+- `Inertia.flash(req, key, value)` sends data to the next page in the top level `flash` field of Inertia 3. It is sent once.
+- Docs: the setup order `SessionMiddleware`, `CsrfMiddleware`, `InertiaMiddleware`, and the form flow.
+
 ## 3.0.0-alpha.2
 
 - Works with the Inertia 3 client (`@inertiajs/react` 3 and others). Before, the app did not start, because the client could not find the first page.
