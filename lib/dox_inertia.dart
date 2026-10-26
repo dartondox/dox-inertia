@@ -6,5 +6,5 @@ export 'src/inertia.dart';
 export 'src/inertia_config.dart';
 export 'src/inertia_middleware.dart';
 export 'src/inertia_props.dart';
-export 'src/inertia_service.dart';
+export 'src/inertia_provider.dart';
 export 'src/vite.dart';

@@ -77,23 +77,23 @@ InertiaConfig inertiaConfig = InertiaConfig(
 
 Paths are from the project root, where the app runs.
 
-### 3. Service
+### 3. Provider
 
-The service sets up Inertia in every isolate. Put it in `lib/` so the generated container finds it.
+The provider sets up Inertia in every isolate. Put it in `lib/` so the generated container finds it.
 
-`lib/services/inertia_service.dart`:
+`lib/providers/inertia_provider.dart`:
 
 ```dart
 import 'package:dox_inertia/dox_inertia.dart';
 
 import '../config/inertia.dart';
 
-class AppInertiaService extends InertiaService {
-  AppInertiaService() : super(inertiaConfig);
+class AppInertiaProvider extends InertiaProvider {
+  AppInertiaProvider() : super(inertiaConfig);
 }
 ```
 
-With no service, Dox uses the defaults of `InertiaConfig`.
+With no provider, Dox uses the defaults of `InertiaConfig`.
 
 ### 4. Vite
 
