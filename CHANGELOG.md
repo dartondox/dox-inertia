@@ -1,3 +1,7 @@
+## 3.0.0
+
+- The first stable release.
+
 ## 3.0.0-alpha.4
 
 - `InertiaProvider` (was a DoxService): extend it in your app, `shutdown()` is optional.
