@@ -13,6 +13,9 @@ const Map<String, String> inertiaHeaders = <String, String>{
 
 int calls = 0;
 
+/// a prop value with no toJson()
+class NoJson {}
+
 class ShareProps extends InertiaMiddleware {
   @override
   Future<Map<String, dynamic>> share(DoxRequest req) async {
@@ -50,6 +53,12 @@ class InertiaRouter extends Router {
     Route.put('/users', (DoxRequest req) => redirect('/users'));
     Route.patch('/users', (DoxRequest req) => redirect('/users'));
     Route.delete('/users', (DoxRequest req) => redirect('/users'));
+    Route.get('/bad-prop', (DoxRequest req) {
+      return inertia(req, 'Bad', <String, dynamic>{
+        'ok': 1,
+        'user': () => <String, dynamic>{'pet': NoJson()},
+      });
+    });
     Route.get('/no-session', (DoxRequest req) {
       return inertia(req, 'Plain');
     });
@@ -206,6 +215,28 @@ void main() {
   });
 
   group('inertia request', () {
+    test('a prop with no toJson() gives an error that names it', () async {
+      Env().env['APP_ENV'] = 'development';
+      try {
+        for (Map<String, String> headers in <Map<String, String>>[
+          inertiaHeaders,
+          <String, String>{},
+        ]) {
+          TestResponse res = await client.get('/bad-prop', headers: headers);
+          res.expectStatus(500);
+          expect(
+            res.body,
+            contains(
+              'The Inertia prop "user" can not be turned into JSON: '
+              'NoJson has no toJson() method.',
+            ),
+          );
+        }
+      } finally {
+        Env().env.remove('APP_ENV');
+      }
+    });
+
     test('gives the page as JSON', () async {
       TestResponse res = await client.get('/users', headers: inertiaHeaders);
       res
