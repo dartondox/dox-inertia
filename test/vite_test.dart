@@ -112,6 +112,24 @@ void main() {
     );
   });
 
+  test('the manifest is read again only when the file changes', () async {
+    await writeManifest(<String, dynamic>{
+      'resources/js/app.js': <String, dynamic>{'file': 'assets/app-1.js'},
+    });
+    File file = File('${dir.path}/build/.vite/manifest.json');
+    DateTime time = await file.lastModified();
+    expect(await Vite(config()).tags(), contains('app-1.js'));
+    // same size and time: the cached manifest is used
+    await writeManifest(<String, dynamic>{
+      'resources/js/app.js': <String, dynamic>{'file': 'assets/app-2.js'},
+    });
+    await file.setLastModified(time);
+    expect(await Vite(config()).tags(), contains('app-1.js'));
+    // a new time (a new build): the file is read again
+    await file.setLastModified(time.add(const Duration(seconds: 5)));
+    expect(await Vite(config()).tags(), contains('app-2.js'));
+  });
+
   test('a missing entry or manifest throws', () async {
     expect(Vite(config()).tags(), throwsStateError);
     await writeManifest(<String, dynamic>{});

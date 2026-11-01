@@ -185,6 +185,24 @@ void main() {
       expect('@vite/client'.allMatches(res.body).length, 1);
       expect(res.body, contains('@vite @inertia'));
     });
+
+    test('reads the root view again only when the file changes', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      DateTime time = await view.lastModified();
+      try {
+        expect((await client.get('/users')).body, startsWith('<html>'));
+        // same size and time: the cached text is used
+        await view.writeAsString(old.replaceFirst('<html>', '<HTML>'));
+        await view.setLastModified(time);
+        expect((await client.get('/users')).body, startsWith('<html>'));
+        // a new time (an edit in dev): the file is read again
+        await view.setLastModified(time.add(const Duration(seconds: 5)));
+        expect((await client.get('/users')).body, startsWith('<HTML>'));
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
   });
 
   group('inertia request', () {

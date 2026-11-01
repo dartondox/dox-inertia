@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dox_core/dox_core.dart';
 
+import 'file_cache.dart';
 import 'inertia_config.dart';
 import 'inertia_props.dart';
 import 'vite.dart';
@@ -63,7 +64,7 @@ Future<DoxResponse> inertia(
   }
 
   InertiaConfig config = Inertia.config;
-  String root = await File(config.rootView).readAsString();
+  String root = await FileCache.read(config.rootView);
   // @vite first: a prop can hold the text "@vite", the tags can not
   // hold "@inertia"
   String html = root
