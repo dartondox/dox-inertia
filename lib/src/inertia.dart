@@ -57,10 +57,9 @@ Future<DoxResponse> inertia(
     if (flash is Map && flash.isNotEmpty) 'flash': flash,
   };
 
-  String json = _encode(page);
   if (isInertia) {
-    return response(json)
-        .contentType(ContentType.json)
+    // the content stays the page Map: Dox turns it into JSON
+    return response(page)
         .header('X-Inertia', 'true')
         .header(HttpHeaders.varyHeader, 'X-Inertia');
   }
@@ -71,7 +70,7 @@ Future<DoxResponse> inertia(
   // hold "@inertia"
   String html = root
       .replaceFirst('@vite', await Vite(config).tags())
-      .replaceFirst('@inertia', _root(json));
+      .replaceFirst('@inertia', _root(_encode(page)));
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');

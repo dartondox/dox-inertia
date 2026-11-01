@@ -1,8 +1,8 @@
 ## Unreleased
 
-- Security: when `APP_ENV` is `production`, the Vite `public/hot` file is ignored, with one warning. A hot file left in a deploy no longer makes pages load scripts from its url.
+- Security: when `APP_ENV` is exactly `production`, the Vite `public/hot` file is ignored, with one warning. A hot file left in a deploy no longer makes pages load scripts from its url.
 - The root view and the Vite manifest are kept in memory. They are read again only when the file changes.
-- A prop that can not be turned into JSON (no `toJson()`) now gives an error that names the prop and its type.
+- A prop that can not be turned into JSON (no `toJson()`) now gives an error that names the prop and its type, on a full page load.
 
 ## 3.0.0
 

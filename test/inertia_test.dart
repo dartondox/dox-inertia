@@ -218,20 +218,15 @@ void main() {
     test('a prop with no toJson() gives an error that names it', () async {
       Env().env['APP_ENV'] = 'development';
       try {
-        for (Map<String, String> headers in <Map<String, String>>[
-          inertiaHeaders,
-          <String, String>{},
-        ]) {
-          TestResponse res = await client.get('/bad-prop', headers: headers);
-          res.expectStatus(500);
-          expect(
-            res.body,
-            contains(
-              'The Inertia prop "user" can not be turned into JSON: '
-              'NoJson has no toJson() method.',
-            ),
-          );
-        }
+        TestResponse res = await client.get('/bad-prop');
+        res.expectStatus(500);
+        expect(
+          res.body,
+          contains(
+            'The Inertia prop "user" can not be turned into JSON: '
+            'NoJson has no toJson() method.',
+          ),
+        );
       } finally {
         Env().env.remove('APP_ENV');
       }
