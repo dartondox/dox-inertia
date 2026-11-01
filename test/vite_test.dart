@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dox_core/dox_core.dart';
 import 'package:dox_inertia/dox_inertia.dart';
 import 'package:test/test.dart';
 
@@ -56,6 +57,29 @@ void main() {
     );
   });
 
+  test('production ignores the hot file and uses the build', () async {
+    await File('${dir.path}/hot').writeAsString('http://evil.test:5173');
+    await writeManifest(<String, dynamic>{
+      'resources/js/app.js': <String, dynamic>{'file': 'assets/app-1.js'},
+    });
+    Env().env['APP_ENV'] = 'production';
+    try {
+      expect(await Vite(config()).devUrl(), isNull);
+      expect(
+        await Vite(config()).tags(),
+        '<script type="module" src="/build/assets/app-1.js"></script>',
+      );
+      // a url in the config is still used
+      expect(
+        await Vite(config(devServerUrl: 'http://localhost:5173')).devUrl(),
+        'http://localhost:5173',
+      );
+    } finally {
+      Env().env.remove('APP_ENV');
+    }
+    expect(await Vite(config()).devUrl(), 'http://evil.test:5173');
+  });
+
   test('build tags from the manifest, with css of imported chunks', () async {
     await writeManifest(<String, dynamic>{
       'resources/js/app.js': <String, dynamic>{
@@ -86,6 +110,24 @@ void main() {
       '<link rel="stylesheet" href="/build/assets/style-3.css">\n'
       '<script type="module" src="/build/assets/app-1.js"></script>',
     );
+  });
+
+  test('the manifest is read again only when the file changes', () async {
+    await writeManifest(<String, dynamic>{
+      'resources/js/app.js': <String, dynamic>{'file': 'assets/app-1.js'},
+    });
+    File file = File('${dir.path}/build/.vite/manifest.json');
+    DateTime time = await file.lastModified();
+    expect(await Vite(config()).tags(), contains('app-1.js'));
+    // same size and time: the cached manifest is used
+    await writeManifest(<String, dynamic>{
+      'resources/js/app.js': <String, dynamic>{'file': 'assets/app-2.js'},
+    });
+    await file.setLastModified(time);
+    expect(await Vite(config()).tags(), contains('app-1.js'));
+    // a new time (a new build): the file is read again
+    await file.setLastModified(time.add(const Duration(seconds: 5)));
+    expect(await Vite(config()).tags(), contains('app-2.js'));
   });
 
   test('a missing entry or manifest throws', () async {

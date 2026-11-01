@@ -13,6 +13,9 @@ const Map<String, String> inertiaHeaders = <String, String>{
 
 int calls = 0;
 
+/// a prop value with no toJson()
+class NoJson {}
+
 class ShareProps extends InertiaMiddleware {
   @override
   Future<Map<String, dynamic>> share(DoxRequest req) async {
@@ -50,6 +53,12 @@ class InertiaRouter extends Router {
     Route.put('/users', (DoxRequest req) => redirect('/users'));
     Route.patch('/users', (DoxRequest req) => redirect('/users'));
     Route.delete('/users', (DoxRequest req) => redirect('/users'));
+    Route.get('/bad-prop', (DoxRequest req) {
+      return inertia(req, 'Bad', <String, dynamic>{
+        'ok': 1,
+        'user': () => <String, dynamic>{'pet': NoJson()},
+      });
+    });
     Route.get('/no-session', (DoxRequest req) {
       return inertia(req, 'Plain');
     });
@@ -185,9 +194,44 @@ void main() {
       expect('@vite/client'.allMatches(res.body).length, 1);
       expect(res.body, contains('@vite @inertia'));
     });
+
+    test('reads the root view again only when the file changes', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      DateTime time = await view.lastModified();
+      try {
+        expect((await client.get('/users')).body, startsWith('<html>'));
+        // same size and time: the cached text is used
+        await view.writeAsString(old.replaceFirst('<html>', '<HTML>'));
+        await view.setLastModified(time);
+        expect((await client.get('/users')).body, startsWith('<html>'));
+        // a new time (an edit in dev): the file is read again
+        await view.setLastModified(time.add(const Duration(seconds: 5)));
+        expect((await client.get('/users')).body, startsWith('<HTML>'));
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
   });
 
   group('inertia request', () {
+    test('a prop with no toJson() gives an error that names it', () async {
+      Env().env['APP_ENV'] = 'development';
+      try {
+        TestResponse res = await client.get('/bad-prop');
+        res.expectStatus(500);
+        expect(
+          res.body,
+          contains(
+            'The Inertia prop "user" can not be turned into JSON: '
+            'NoJson has no toJson() method.',
+          ),
+        );
+      } finally {
+        Env().env.remove('APP_ENV');
+      }
+    });
+
     test('gives the page as JSON', () async {
       TestResponse res = await client.get('/users', headers: inertiaHeaders);
       res

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dox_core/dox_core.dart';
 
+import 'file_cache.dart';
 import 'inertia_config.dart';
 import 'inertia_props.dart';
 import 'vite.dart';
@@ -57,18 +58,19 @@ Future<DoxResponse> inertia(
   };
 
   if (isInertia) {
+    // the content stays the page Map: Dox turns it into JSON
     return response(page)
         .header('X-Inertia', 'true')
         .header(HttpHeaders.varyHeader, 'X-Inertia');
   }
 
   InertiaConfig config = Inertia.config;
-  String root = await File(config.rootView).readAsString();
+  String root = await FileCache.read(config.rootView);
   // @vite first: a prop can hold the text "@vite", the tags can not
   // hold "@inertia"
   String html = root
       .replaceFirst('@vite', await Vite(config).tags())
-      .replaceFirst('@inertia', _root(page));
+      .replaceFirst('@inertia', _root(_encode(page)));
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
@@ -83,13 +85,50 @@ Map<String, dynamic> _errors(DoxRequest req) {
   return <String, dynamic>{bag: errors};
 }
 
-/// The HTML of `@inertia` for Inertia v3: the [page] as JSON in a
+/// The [page] as JSON. A prop that can not be turned into JSON throws an
+/// error that names the prop.
+String _encode(Map<String, dynamic> page) {
+  try {
+    return jsonEncode(page, toEncodable: _toJson);
+  } on JsonUnsupportedObjectError catch (error) {
+    Map<String, dynamic> props = page['props'] as Map<String, dynamic>;
+    for (MapEntry<String, dynamic> prop in props.entries) {
+      try {
+        jsonEncode(prop.value, toEncodable: _toJson);
+      } on JsonUnsupportedObjectError {
+        throw _PropJsonError(prop.key, error);
+      }
+    }
+    rethrow;
+  }
+}
+
+/// A prop that can not be turned into JSON. It is still a
+/// [JsonUnsupportedObjectError], with a message that names the prop.
+class _PropJsonError extends JsonUnsupportedObjectError {
+  _PropJsonError(this.prop, JsonUnsupportedObjectError error)
+    : super(error.unsupportedObject, cause: error.cause);
+
+  final String prop;
+
+  @override
+  String toString() {
+    String type = unsupportedObject.runtimeType.toString();
+    String reason = cause is NoSuchMethodError
+        ? '$type has no toJson() method. Add toJson() to $type, or pass a '
+              'Map, List, String, num, bool or DateTime.'
+        : 'toJson() of $type failed: $cause';
+    return 'The Inertia prop "$prop" can not be turned into JSON: $reason';
+  }
+}
+
+/// The HTML of `@inertia` for Inertia v3: the page [json] in a
 /// `<script data-page="app">` tag, then the `<div id="app">` the app
 /// renders into.
-String _root(Map<String, dynamic> page) {
+String _root(String json) {
   // `<`, `>` and `&` only appear inside JSON strings, so the \u escapes
   // keep the same data. With no `<`, a prop can not end the script tag.
-  String json = jsonEncode(page, toEncodable: _toJson)
+  json = json
       .replaceAll('<', r'\u003c')
       .replaceAll('>', r'\u003e')
       .replaceAll('&', r'\u0026');

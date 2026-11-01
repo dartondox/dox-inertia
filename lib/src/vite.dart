@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dox_core/dox_core.dart';
+
+import 'file_cache.dart';
 import 'inertia_config.dart';
 
 /// Makes the script and style tags for `@vite` in the root view.
@@ -19,24 +22,45 @@ class Vite {
   Future<String> tags() async {
     String? dev = await devUrl();
     if (dev != null) return devTags(dev);
-    File file = File(manifestPath);
-    if (!await file.exists()) {
+    String text;
+    try {
+      text = await FileCache.read(manifestPath);
+    } on FileSystemException {
       throw StateError(
         'No Vite manifest at $manifestPath. Run `vite build`, or run '
         '`vite` (dev server) with a `${config.publicPath}/hot` file or '
         '`InertiaConfig.devServerUrl`.',
       );
     }
-    Object? manifest = jsonDecode(await file.readAsString());
-    return buildTags((manifest as Map<String, dynamic>));
+    // the same text and config give the same tags: skip the JSON work
+    if (identical(text, _builtText) && identical(config, _builtConfig)) {
+      return _builtTags!;
+    }
+    String tags = buildTags(jsonDecode(text) as Map<String, dynamic>);
+    _builtText = text;
+    _builtConfig = config;
+    _builtTags = tags;
+    return tags;
   }
 
+  static String? _builtText;
+  static InertiaConfig? _builtConfig;
+  static String? _builtTags;
+
   /// The url of the dev server, or null when it does not run.
+  ///
+  /// When `APP_ENV` is `production`, the `hot` file is ignored. A `hot`
+  /// file left in a deploy would make every page load scripts from the
+  /// url in it. `InertiaConfig.devServerUrl` is still used.
   Future<String?> devUrl() async {
     String? url = config.devServerUrl;
     if (url == null) {
       File hot = File('${config.publicPath}/hot');
       if (!await hot.exists()) return null;
+      if (Env.get<String>('APP_ENV').toLowerCase() == 'production') {
+        _warnHot(hot.path);
+        return null;
+      }
       url = (await hot.readAsString()).trim();
     }
     return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
@@ -122,4 +146,17 @@ class Vite {
   }
 
   String _url(String file) => '/${config.buildDirectory}/$file';
+
+  static bool _hotWarned = false;
+
+  /// print the warning about [path] once per isolate
+  static void _warnHot(String path) {
+    if (_hotWarned) return;
+    _hotWarned = true;
+    stderr.writeln(
+      'dox_inertia: found the Vite hot file $path, but APP_ENV is '
+      'production. It is ignored and the built files are used. '
+      'Remove the hot file from the deploy.',
+    );
+  }
 }
