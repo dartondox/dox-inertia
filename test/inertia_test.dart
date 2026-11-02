@@ -49,6 +49,7 @@ class InertiaRouter extends Router {
     Route.get('/away', (DoxRequest req) {
       return Inertia.location(req, 'https://example.com/pay');
     });
+    Route.get('/go', (DoxRequest req) => redirect('/users'));
     Route.post('/users', (DoxRequest req) => redirect('/users'));
     Route.put('/users', (DoxRequest req) => redirect('/users'));
     Route.patch('/users', (DoxRequest req) => redirect('/users'));
@@ -294,6 +295,17 @@ void main() {
       );
       res.expectStatus(409);
       expect(calls, 0);
+    });
+
+    test('old version: a GET route that redirects gets 409, not 302', () async {
+      TestResponse res = await client.get(
+        '/go',
+        headers: <String, String>{
+          'X-Inertia': 'true',
+          'X-Inertia-Version': 'old',
+        },
+      );
+      res.expectStatus(409).expectHeader('x-inertia-location', endsWith('/go'));
     });
 
     test('409 when the version is old', () async {
