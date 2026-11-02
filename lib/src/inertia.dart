@@ -173,12 +173,36 @@ Future<Map<String, dynamic>> _props(
 }
 
 /// the value of a prop: unwrap it, run it when it is a function, wait
-/// for it when it is a Future
+/// for it when it is a Future. Maps and lists in it are resolved too, so
+/// `{'auth': {'user': () => ...}}` works.
 Future<Object?> _resolve(Object? value) async {
   if (value is InertiaProp) value = value.value;
   if (value is Object? Function()) value = value();
   if (value is Future<Object?>) value = await value;
+  if (value is Map) {
+    return <Object?, Object?>{
+      for (MapEntry<Object?, Object?> entry in value.entries)
+        entry.key: _isPlain(entry.value)
+            ? entry.value
+            : await _resolve(entry.value),
+    };
+  }
+  if (value is List) {
+    return <Object?>[
+      for (Object? item in value) _isPlain(item) ? item : await _resolve(item),
+    ];
+  }
   return value;
+}
+
+/// true when [value] has nothing to resolve. It skips the await for
+/// plain values, so a big list of rows stays fast.
+bool _isPlain(Object? value) {
+  return value is! Function &&
+      value is! Future<Object?> &&
+      value is! Map &&
+      value is! List &&
+      value is! InertiaProp;
 }
 
 /// `a, b` gives `['a', 'b']`

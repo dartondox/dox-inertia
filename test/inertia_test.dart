@@ -59,6 +59,14 @@ class InertiaRouter extends Router {
         'user': () => <String, dynamic>{'pet': NoJson()},
       });
     });
+    Route.get('/nested', (DoxRequest req) {
+      return inertia(req, 'Nested', <String, dynamic>{
+        'auth': <String, dynamic>{
+          'user': () => <String, dynamic>{'name': 'ann'},
+          'roles': <Object?>[() async => 'admin', 'user'],
+        },
+      });
+    });
     Route.get('/no-session', (DoxRequest req) {
       return inertia(req, 'Plain');
     });
@@ -263,6 +271,15 @@ void main() {
         'side': <String>['likes'],
       });
       expect(res.json['mergeProps'], <String>['posts']);
+    });
+
+    test('closures in nested maps and lists are resolved', () async {
+      TestResponse res = await client.get('/nested', headers: inertiaHeaders);
+      res.expectStatus(200);
+      expect(res.json['props']['auth'], <String, dynamic>{
+        'user': <String, dynamic>{'name': 'ann'},
+        'roles': <String>['admin', 'user'],
+      });
     });
 
     test('409 when the version is old', () async {
