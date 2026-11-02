@@ -32,12 +32,10 @@ Future<DoxResponse> inertia(
   String? version = Inertia.version;
   bool isInertia = Inertia.isInertia(req);
 
-  // the browser has old assets: it must load the whole page again
-  if (isInertia &&
-      req.method == 'GET' &&
-      (req.header('X-Inertia-Version') ?? '') != (version ?? '')) {
-    return Inertia.location(req, '${req.scheme()}://${req.host()}$url');
-  }
+  // InertiaMiddleware checks this first. This check is for apps with no
+  // InertiaMiddleware.
+  DoxResponse? stale = staleVersion(req);
+  if (stale != null) return stale;
 
   Map<String, dynamic> shared = Inertia.shared(req);
   Object? flash = req.hasSession ? req.session.pull(Inertia.flashKey) : null;
@@ -74,6 +72,28 @@ Future<DoxResponse> inertia(
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
+}
+
+/// Internal, for `inertia()` and `InertiaMiddleware`: `409` when the
+/// browser has old assets and must load the whole page again, else null.
+/// The flash data is kept for the next request, so a flash message is not
+/// lost on the full page load after a deploy.
+DoxResponse? staleVersion(DoxRequest req) {
+  if (!Inertia.isInertia(req) ||
+      req.method != 'GET' ||
+      (req.header('X-Inertia-Version') ?? '') == (Inertia.version ?? '')) {
+    return null;
+  }
+  if (req.hasSession) {
+    // ponytail: all() reads the session first. reflash() of dox_core
+    // 3.0.2 keeps nothing when the session was not read yet.
+    req.session.all();
+    req.session.reflash();
+  }
+  String url = req.uri.hasQuery
+      ? '${req.uri.path}?${req.uri.query}'
+      : req.uri.path;
+  return Inertia.location(req, '${req.scheme()}://${req.host()}$url');
 }
 
 /// The flashed validation errors, `{}` when there are none. With the
@@ -173,12 +193,36 @@ Future<Map<String, dynamic>> _props(
 }
 
 /// the value of a prop: unwrap it, run it when it is a function, wait
-/// for it when it is a Future
+/// for it when it is a Future. Maps and lists in it are resolved too, so
+/// `{'auth': {'user': () => ...}}` works.
 Future<Object?> _resolve(Object? value) async {
   if (value is InertiaProp) value = value.value;
   if (value is Object? Function()) value = value();
   if (value is Future<Object?>) value = await value;
+  if (value is Map) {
+    return <Object?, Object?>{
+      for (MapEntry<Object?, Object?> entry in value.entries)
+        entry.key: _isPlain(entry.value)
+            ? entry.value
+            : await _resolve(entry.value),
+    };
+  }
+  if (value is List) {
+    return <Object?>[
+      for (Object? item in value) _isPlain(item) ? item : await _resolve(item),
+    ];
+  }
   return value;
+}
+
+/// true when [value] has nothing to resolve. It skips the await for
+/// plain values, so a big list of rows stays fast.
+bool _isPlain(Object? value) {
+  return value is! Function &&
+      value is! Future<Object?> &&
+      value is! Map &&
+      value is! List &&
+      value is! InertiaProp;
 }
 
 /// `a, b` gives `['a', 'b']`

@@ -7,6 +7,9 @@ import 'inertia.dart';
 /// Runs on every Inertia route. Add it to `globalMiddleware` or to a
 /// router, after `SessionMiddleware` and `CsrfMiddleware`.
 ///
+/// - When the browser has old assets (an old `X-Inertia-Version`), it
+///   sends `409` before the controller runs. See `Asset version` in the
+///   README.
 /// - It shares the props of [share] with every page.
 /// - After a PUT, PATCH or DELETE Inertia request, it turns a `302`
 ///   redirect into `303`. Then the browser follows it with GET.
@@ -33,6 +36,9 @@ class InertiaMiddleware implements IDoxNextMiddleware {
 
   @override
   Future<DoxResponse> handle(DoxRequest req, Next next) async {
+    // old assets: send 409 before the controller runs
+    DoxResponse? stale = staleVersion(req);
+    if (stale != null) return stale;
     Inertia.share(req, await share(req));
     DoxResponse res = await next();
     if (res.status == 302 &&

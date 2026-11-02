@@ -360,7 +360,7 @@ InertiaConfig inertiaConfig = InertiaConfig(
 
 ## Asset version
 
-Each page has a version. When you deploy new assets, the version changes. A browser with the old version that makes an Inertia `GET` request gets `409` with `X-Inertia-Location`. The client then loads the whole page again, with the new assets.
+Each page has a version. When you deploy new assets, the version changes. A browser with the old version that makes an Inertia `GET` request gets `409` with `X-Inertia-Location`. The client then loads the whole page again, with the new assets. `InertiaMiddleware` sends the `409` before the controller runs. The flash data is kept for the next request, so a flash message is not lost.
 
 The default version is a hash of the Vite manifest. Dox reads it once per isolate, so restart the server after `vite build` (a deploy does this). To set your own, use `version` in the config, eg. the git commit.
 

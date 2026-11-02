@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fix: flash messages are no longer lost after a deploy. When the asset version is old, the session flash data is now kept for the next request before the `409` is sent.
+- `InertiaMiddleware` now checks the asset version before the controller runs. A request with an old version gets the `409` at once, and the controller does no work for a page that is never shown.
+- Fix: a function prop inside a map or a list (like `{'auth': {'user': () => ...}}`) is now run too. Before, only top level function props were run, and a nested one failed when the page was turned into JSON.
 - Security: when `APP_ENV` is exactly `production`, the Vite `public/hot` file is ignored, with one warning. A hot file left in a deploy no longer makes pages load scripts from its url.
 - The root view and the Vite manifest are kept in memory. They are read again only when the file changes.
 - A prop that can not be turned into JSON (no `toJson()`) now gives an error that names the prop and its type, on a full page load.
