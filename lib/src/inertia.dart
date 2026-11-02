@@ -32,12 +32,10 @@ Future<DoxResponse> inertia(
   String? version = Inertia.version;
   bool isInertia = Inertia.isInertia(req);
 
-  // the browser has old assets: it must load the whole page again
-  if (isInertia &&
-      req.method == 'GET' &&
-      (req.header('X-Inertia-Version') ?? '') != (version ?? '')) {
-    return Inertia.location(req, '${req.scheme()}://${req.host()}$url');
-  }
+  // InertiaMiddleware checks this first. This check is for apps with no
+  // InertiaMiddleware.
+  DoxResponse? stale = staleVersion(req);
+  if (stale != null) return stale;
 
   Map<String, dynamic> shared = Inertia.shared(req);
   Object? flash = req.hasSession ? req.session.pull(Inertia.flashKey) : null;
@@ -74,6 +72,28 @@ Future<DoxResponse> inertia(
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
+}
+
+/// Internal, for `inertia()` and `InertiaMiddleware`: `409` when the
+/// browser has old assets and must load the whole page again, else null.
+/// The flash data is kept for the next request, so a flash message is not
+/// lost on the full page load after a deploy.
+DoxResponse? staleVersion(DoxRequest req) {
+  if (!Inertia.isInertia(req) ||
+      req.method != 'GET' ||
+      (req.header('X-Inertia-Version') ?? '') == (Inertia.version ?? '')) {
+    return null;
+  }
+  if (req.hasSession) {
+    // ponytail: all() reads the session first. reflash() of dox_core
+    // 3.0.2 keeps nothing when the session was not read yet.
+    req.session.all();
+    req.session.reflash();
+  }
+  String url = req.uri.hasQuery
+      ? '${req.uri.path}?${req.uri.query}'
+      : req.uri.path;
+  return Inertia.location(req, '${req.scheme()}://${req.host()}$url');
 }
 
 /// The flashed validation errors, `{}` when there are none. With the

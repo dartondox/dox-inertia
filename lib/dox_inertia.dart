@@ -2,7 +2,7 @@
 /// Vue or Svelte and Dox controllers, with no API to write.
 library;
 
-export 'src/inertia.dart';
+export 'src/inertia.dart' hide staleVersion;
 export 'src/inertia_config.dart';
 export 'src/inertia_middleware.dart';
 export 'src/inertia_props.dart';

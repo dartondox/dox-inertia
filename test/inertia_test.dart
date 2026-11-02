@@ -67,6 +67,10 @@ class InertiaRouter extends Router {
         },
       });
     });
+    Route.get('/counted', (DoxRequest req) {
+      calls++;
+      return inertia(req, 'Counted');
+    });
     Route.get('/no-session', (DoxRequest req) {
       return inertia(req, 'Plain');
     });
@@ -280,6 +284,16 @@ void main() {
         'user': <String, dynamic>{'name': 'ann'},
         'roles': <String>['admin', 'user'],
       });
+    });
+
+    test('old version: 409 before the controller runs', () async {
+      calls = 0;
+      TestResponse res = await client.get(
+        '/counted',
+        headers: <String, String>{'X-Inertia': 'true'},
+      );
+      res.expectStatus(409);
+      expect(calls, 0);
     });
 
     test('409 when the version is old', () async {
@@ -520,6 +534,31 @@ void main() {
         headers: inertiaHeaders,
       );
       expect(again.json.containsKey('flash'), false);
+    });
+
+    test('old version: the flash is kept for the page after the 409', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      await browser.send(
+        'POST',
+        '/s/form',
+        body: <String, String>{'email': 'a@b.co'},
+        headers: browser.formHeaders,
+      );
+
+      TestResponse stale = await browser.send(
+        'GET',
+        '/s/form',
+        headers: <String, String>{'X-Inertia': 'true'},
+      );
+      stale.expectStatus(409);
+
+      TestResponse page = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(page.json['flash'], <String, dynamic>{'message': 'Saved'});
     });
   });
 }
