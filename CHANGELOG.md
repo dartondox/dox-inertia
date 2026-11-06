@@ -1,5 +1,10 @@
 ## Unreleased
 
+- `Inertia.render(req, component, props)` does the same as `inertia(...)`. `Inertia.lazy` does the same as `Inertia.optional`.
+- `Inertia.shareGlobal(key, value)` shares a prop with every page of the app. It is for app wide constants or functions that do not read a request. Data of one user still goes in `InertiaMiddleware.share`.
+- A deferred prop can be merged: `Inertia.defer(fn).merge()` or `Inertia.defer(fn, merge: true)`. When it is sent, it is listed in `mergeProps`.
+- An empty `200` answer to an Inertia request now goes back to the page it came from, like Laravel. Only a `Referer` of the same site is used, else it goes to `/`. Requests without `X-Inertia` are not changed.
+- A list of plain row maps in a prop is no longer awaited row by row. The props are the same, they are built faster.
 - Fix: flash messages are no longer lost after a deploy. When the asset version is old, the session flash data is now kept for the next request before the `409` is sent.
 - `InertiaMiddleware` now checks the asset version before the controller runs. A request with an old version gets the `409` at once, and the controller does no work for a page that is never shown.
 - An Inertia GET with an old asset version gets the `409` at once, also when the route would redirect. Before, it got a `302` first, and the `409` came on the next page.

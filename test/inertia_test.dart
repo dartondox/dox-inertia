@@ -68,6 +68,23 @@ class InertiaRouter extends Router {
         },
       });
     });
+    Route.get('/rows', (DoxRequest req) {
+      return Inertia.render(req, 'Rows', <String, dynamic>{
+        'rows': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 1},
+          <String, dynamic>{'id': 2, 'tag': () async => 'new'},
+          <String, dynamic>{
+            'id': 3,
+            'tags': <String>['a'],
+          },
+        ],
+        'stats': Inertia.lazy(() => 9),
+        'feed': Inertia.defer(() => <int>[3, 4]).merge(),
+        'more': Inertia.defer(() => <int>[5], merge: true),
+      });
+    });
+    Route.get('/empty', (DoxRequest req) => null);
+    Route.put('/empty', (DoxRequest req) => '');
     Route.get('/counted', (DoxRequest req) {
       calls++;
       return inertia(req, 'Counted');
@@ -323,6 +340,43 @@ void main() {
     });
   });
 
+  group('render, lazy, rows and merged defer', () {
+    test('a list of row maps keeps its values and order', () async {
+      TestResponse res = await client.get('/rows', headers: inertiaHeaders);
+      expect(res.json['props'], <String, dynamic>{
+        'app': 'Dox',
+        'title': 'shared',
+        'rows': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 1},
+          <String, dynamic>{'id': 2, 'tag': 'new'},
+          <String, dynamic>{
+            'id': 3,
+            'tags': <String>['a'],
+          },
+        ],
+      });
+      expect(res.json['deferredProps'], <String, dynamic>{
+        'default': <String>['feed', 'more'],
+      });
+      expect(res.json.containsKey('mergeProps'), false);
+    });
+
+    test('a merged defer prop is in mergeProps when sent', () async {
+      TestResponse res = await client.get(
+        '/rows',
+        headers: <String, String>{
+          ...inertiaHeaders,
+          'X-Inertia-Partial-Component': 'Rows',
+          'X-Inertia-Partial-Data': 'feed,more,stats',
+        },
+      );
+      expect(res.json['props']['feed'], <int>[3, 4]);
+      expect(res.json['props']['more'], <int>[5]);
+      expect(res.json['props']['stats'], 9);
+      expect(res.json['mergeProps'], <String>['feed', 'more']);
+    });
+  });
+
   group('partial reload', () {
     Map<String, String> partial(Map<String, String> more) {
       return <String, String>{
@@ -391,6 +445,35 @@ void main() {
   });
 
   group('redirects', () {
+    test('an empty 200 goes back in an Inertia request', () async {
+      (await client.get(
+        '/empty',
+        headers: <String, String>{...inertiaHeaders, 'Referer': '/users'},
+      )).expectStatus(302).expectHeader('location', '/users');
+      // after PUT it is a 303, like any other redirect
+      (await client.put(
+        '/empty',
+        headers: <String, String>{...inertiaHeaders, 'Referer': '/users'},
+      )).expectStatus(303).expectHeader('location', '/users');
+    });
+
+    test('an empty 200 never goes back to another site', () async {
+      for (String referer in <String>[
+        'https://evil.com/x',
+        '//evil.com',
+        '/\\evil.com',
+      ]) {
+        (await client.get(
+          '/empty',
+          headers: <String, String>{...inertiaHeaders, 'Referer': referer},
+        )).expectStatus(302).expectHeader('location', '/');
+      }
+    });
+
+    test('an empty 200 is kept without X-Inertia', () async {
+      (await client.get('/empty')).expectStatus(200);
+    });
+
     test('303 after PUT, PATCH and DELETE in an Inertia request', () async {
       for (String method in <String>['PUT', 'PATCH', 'DELETE']) {
         TestResponse res = await client.send(
@@ -571,6 +654,31 @@ void main() {
         headers: inertiaHeaders,
       );
       expect(page.json['flash'], <String, dynamic>{'message': 'Saved'});
+    });
+  });
+
+  // ponytail: last, because a global share stays for the whole isolate
+  group('global share', () {
+    test('goes to every page, the request share wins', () async {
+      Inertia.shareGlobal('version', 'v1');
+      Inertia.shareGlobal('title', 'global');
+      Inertia.shareGlobal('year', () => 2026);
+      TestResponse res = await client.get(
+        '/no-session',
+        headers: inertiaHeaders,
+      );
+      expect(res.json['props'], <String, dynamic>{
+        'version': 'v1',
+        'title': 'shared',
+        'year': 2026,
+        'app': 'Dox',
+      });
+      expect(res.json['sharedProps'], <String>[
+        'version',
+        'title',
+        'year',
+        'app',
+      ]);
     });
   });
 }

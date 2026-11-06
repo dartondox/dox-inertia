@@ -182,8 +182,11 @@ Future<Map<String, dynamic>> _props(
       (deferred[value.group] ??= <String>[]).add(name);
     }
     if (!send && value is! AlwaysProp) continue;
-    if (value is MergeProp && !reset.contains(name)) merge.add(name);
-    props[name] = await _resolve(value);
+    bool merges =
+        value is MergeProp || (value is DeferProp && value.shouldMerge);
+    if (merges && !reset.contains(name)) merge.add(name);
+    FutureOr<Object?> resolved = _resolve(value);
+    props[name] = resolved is Future<Object?> ? await resolved : resolved;
   }
   return <String, dynamic>{
     'props': props,
@@ -195,34 +198,73 @@ Future<Map<String, dynamic>> _props(
 /// the value of a prop: unwrap it, run it when it is a function, wait
 /// for it when it is a Future. Maps and lists in it are resolved too, so
 /// `{'auth': {'user': () => ...}}` works.
-Future<Object?> _resolve(Object? value) async {
+///
+/// It gives the value at once (no Future) when there is nothing to wait
+/// for, so a big list of plain row maps does not await once per row.
+FutureOr<Object?> _resolve(Object? value) {
   if (value is InertiaProp) value = value.value;
   if (value is Object? Function()) value = value();
-  if (value is Future<Object?>) value = await value;
-  if (value is Map) {
-    return <Object?, Object?>{
-      for (MapEntry<Object?, Object?> entry in value.entries)
-        entry.key: _isPlain(entry.value)
-            ? entry.value
-            : await _resolve(entry.value),
-    };
-  }
-  if (value is List) {
-    return <Object?>[
-      for (Object? item in value) _isPlain(item) ? item : await _resolve(item),
-    ];
-  }
+  if (value is Future<Object?>) return value.then(_resolveItems);
+  return _resolveItems(value);
+}
+
+/// the items of a map or a list resolved, else [value] as it is
+FutureOr<Object?> _resolveItems(Object? value) {
+  if (value is Map) return _resolveMap(value);
+  if (value is List) return _resolveList(value);
   return value;
 }
 
-/// true when [value] has nothing to resolve. It skips the await for
-/// plain values, so a big list of rows stays fast.
-bool _isPlain(Object? value) {
-  return value is! Function &&
-      value is! Future<Object?> &&
-      value is! Map &&
-      value is! List &&
-      value is! InertiaProp;
+/// [value] with each item resolved. It waits only from the first item
+/// that gives a Future, so the items still run one after the other.
+FutureOr<Object?> _resolveList(List<Object?> value) {
+  List<Object?> items = <Object?>[];
+  for (int i = 0; i < value.length; i++) {
+    FutureOr<Object?> item = _resolve(value[i]);
+    if (item is Future<Object?>) return _waitList(value, items, i, item);
+    items.add(item);
+  }
+  return items;
+}
+
+Future<Object?> _waitList(
+  List<Object?> value,
+  List<Object?> items,
+  int i,
+  Future<Object?> item,
+) async {
+  items.add(await item);
+  for (i++; i < value.length; i++) {
+    FutureOr<Object?> next = _resolve(value[i]);
+    items.add(next is Future<Object?> ? await next : next);
+  }
+  return items;
+}
+
+/// like [_resolveList], for the values of a map
+FutureOr<Object?> _resolveMap(Map<Object?, Object?> value) {
+  Map<Object?, Object?> map = <Object?, Object?>{};
+  List<MapEntry<Object?, Object?>> entries = value.entries.toList();
+  for (int i = 0; i < entries.length; i++) {
+    FutureOr<Object?> item = _resolve(entries[i].value);
+    if (item is Future<Object?>) return _waitMap(entries, map, i, item);
+    map[entries[i].key] = item;
+  }
+  return map;
+}
+
+Future<Object?> _waitMap(
+  List<MapEntry<Object?, Object?>> entries,
+  Map<Object?, Object?> map,
+  int i,
+  Future<Object?> item,
+) async {
+  map[entries[i].key] = await item;
+  for (i++; i < entries.length; i++) {
+    FutureOr<Object?> next = _resolve(entries[i].value);
+    map[entries[i].key] = next is Future<Object?> ? await next : next;
+  }
+  return map;
 }
 
 /// `a, b` gives `['a', 'b']`
@@ -247,6 +289,7 @@ class Inertia {
   static bool _versionRead = false;
   static final Expando<Map<String, dynamic>> _shared =
       Expando<Map<String, dynamic>>();
+  static final Map<String, dynamic> _global = <String, dynamic>{};
 
   /// Use [config] in this isolate. `InertiaProvider` calls it.
   /// With no call, the defaults of `InertiaConfig` are used.
@@ -281,9 +324,38 @@ class Inertia {
     _shared[req] = <String, dynamic>{...?_shared[req], ...props};
   }
 
-  /// the props shared with [share] for this request
+  /// Share the prop [key] with every page of the app, like
+  /// `Inertia::share` of Laravel. Call it once at boot, eg. in the
+  /// `setup()` of your `InertiaProvider`, so it runs in every isolate.
+  ///
+  /// Only for app wide values: a constant, or a function that does not
+  /// read a request. The value is kept for all users and all requests.
+  /// For data of one user, like the signed in user, use
+  /// `InertiaMiddleware.share` or `Inertia.share(req, ...)`.
+  /// A prop shared for the request, and a page prop, win over it.
+  /// ```
+  /// Inertia.shareGlobal('appName', 'Dox');
+  /// ```
+  static void shareGlobal(String key, Object? value) {
+    _global[key] = value;
+  }
+
+  /// the props of [shareGlobal], plus the props shared with [share] for
+  /// this request
   static Map<String, dynamic> shared(DoxRequest req) {
-    return _shared[req] ?? const <String, dynamic>{};
+    Map<String, dynamic>? props = _shared[req];
+    if (_global.isEmpty) return props ?? const <String, dynamic>{};
+    return <String, dynamic>{..._global, ...?props};
+  }
+
+  /// The same as `inertia(req, component, props)`, like `Inertia::render`
+  /// of Laravel.
+  static Future<DoxResponse> render(
+    DoxRequest req,
+    String component, [
+    Map<String, dynamic> props = const <String, dynamic>{},
+  ]) {
+    return inertia(req, component, props);
   }
 
   /// A prop that is sent only when a partial reload asks for it.
@@ -291,12 +363,20 @@ class Inertia {
     return OptionalProp(callback);
   }
 
+  /// The same as [optional], like `Inertia::lazy` of Laravel.
+  static OptionalProp lazy(Object? Function() callback) {
+    return OptionalProp(callback);
+  }
+
   /// A prop that loads right after the first visit, in its [group].
+  /// With [merge], the page adds it to its old value, like
+  /// `Inertia.merge`. `Inertia.defer(fn).merge()` does the same.
   static DeferProp defer(
     Object? Function() callback, {
     String group = 'default',
+    bool merge = false,
   }) {
-    return DeferProp(callback, group: group);
+    return DeferProp(callback, group: group, shouldMerge: merge);
   }
 
   /// A prop that is sent on every partial reload.
