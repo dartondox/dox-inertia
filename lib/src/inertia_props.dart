@@ -15,9 +15,30 @@ class OptionalProp extends InertiaProp {
 /// Not sent on the first visit. The page loads it right after, with a
 /// partial reload. Props of the same [group] load in one request.
 class DeferProp extends OptionalProp {
-  const DeferProp(super.value, {this.group = 'default'});
+  const DeferProp(
+    super.value, {
+    this.group = 'default',
+    this.shouldMerge = false,
+  });
 
   final String group;
+
+  /// true when the page adds the value to its old value, like a
+  /// [MergeProp]. Set it with [merge].
+  final bool shouldMerge;
+
+  /// This prop, but the page adds the value to its old value (eg. the
+  /// next page of a list), like `Inertia.merge`.
+  /// ```
+  /// 'posts': Inertia.defer(() => nextPosts()).merge(),
+  /// ```
+  DeferProp merge() {
+    return DeferProp(
+      value as Object? Function(),
+      group: group,
+      shouldMerge: true,
+    );
+  }
 }
 
 /// Always sent, also when a partial reload does not ask for it.

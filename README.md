@@ -199,6 +199,7 @@ class UserController {
 
 A prop can be a function, like `users` above. It runs only when the prop is sent. It can give a `Future`.
 Props become JSON. A model or any object with `toJson()` works. A `DateTime` becomes ISO text.
+`Inertia.render(req, 'Users/Index', {...})` does the same as `inertia(...)`.
 
 ## Shared props
 
@@ -225,6 +226,22 @@ A page prop with the same name wins over a shared prop. `share` can be `async`.
 The page lists the names of the shared props in `sharedProps`. The client keeps them on an instant visit.
 You can also share from any middleware or controller with `Inertia.share(req, {...})`.
 
+For a value that is the same for the whole app, use `Inertia.shareGlobal(key, value)`. Call it once in the `setup()` of your `InertiaProvider`, so it runs in every isolate:
+
+```dart
+class AppInertiaProvider extends InertiaProvider {
+  AppInertiaProvider() : super(inertiaConfig);
+
+  @override
+  void setup() {
+    super.setup();
+    Inertia.shareGlobal('appName', 'Dox');
+  }
+}
+```
+
+A global value is kept for all users and all requests. Use it only for a constant, or a function that does not read a request. Data of one user, like the signed in user, must go in `InertiaMiddleware.share`. A prop shared for the request wins over a global one.
+
 ## Partial reloads
 
 The client can ask for some props only: `router.reload({ only: ['users'] })`. Dox reads the headers and sends only those props. Function props that are not sent do not run.
@@ -243,6 +260,9 @@ return inertia(req, 'Users/Index', <String, dynamic>{
   'comments': Inertia.defer(() => Comment().query().all()),
   'likes': Inertia.defer(() => Like().query().count(), group: 'side'),
 
+  /// deferred, and the page adds the new items to the old ones
+  'feed': Inertia.defer(() => Post().query().all()).merge(),
+
   /// the page adds the new items to the old ones (infinite scroll)
   'posts': Inertia.merge(posts),
 });
@@ -257,6 +277,8 @@ return inertia(req, 'Users/Index', <String, dynamic>{
 | `Inertia.merge` | sent, listed in `mergeProps` | sent when asked |
 
 Deferred props of the same `group` load in one request. The default group is `default`.
+`Inertia.lazy` is the same as `Inertia.optional`.
+A deferred prop with `.merge()` (or `merge: true`) is also listed in `mergeProps` when it is sent.
 
 ## Forms and validation errors
 
@@ -297,6 +319,8 @@ You do not need to pass `errors` yourself. A page prop named `errors` still wins
 After a form, redirect with `redirect(url)` or `back(req)` from Dox.
 
 After `PUT`, `PATCH` or `DELETE`, the browser must follow the redirect with `GET`, not with the same method. So `InertiaMiddleware` turns a `302` into `303` for these Inertia requests. You do not need to do anything.
+
+When a controller gives an empty `200` answer to an Inertia request (eg. it returns nothing), `InertiaMiddleware` sends the browser back to the page it came from, like `back(req)`. Only a `Referer` of the same site is used. Any other `Referer` goes to `/`. A request without `X-Inertia` gets the empty answer as it is.
 
 ```dart
 Future<DoxResponse> update(DoxRequest req, int id) async {
