@@ -1,4 +1,4 @@
-## Unreleased
+## 3.1.0
 
 - `Inertia.render(req, component, props)` does the same as `inertia(...)`. `Inertia.lazy` does the same as `Inertia.optional`.
 - `Inertia.shareGlobal(key, value)` shares a prop with every page of the app. It is for app wide constants or functions that do not read a request. Data of one user still goes in `InertiaMiddleware.share`.
