@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Fix: an empty `200` in an Inertia request is sent back to the page it came from. The redirect lost the headers and cookies that the controller set on the empty answer. They are now kept.
+- Faster: a prop map with no async values no longer makes an extra list.
 
 ## 3.1.0
 
