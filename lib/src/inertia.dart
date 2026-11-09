@@ -241,28 +241,38 @@ Future<Object?> _waitList(
   return items;
 }
 
-/// like [_resolveList], for the values of a map
+/// like [_resolveList], for the values of a map. A map of plain values
+/// makes no extra list.
 FutureOr<Object?> _resolveMap(Map<Object?, Object?> value) {
   Map<Object?, Object?> map = <Object?, Object?>{};
-  List<MapEntry<Object?, Object?>> entries = value.entries.toList();
-  for (int i = 0; i < entries.length; i++) {
-    FutureOr<Object?> item = _resolve(entries[i].value);
-    if (item is Future<Object?>) return _waitMap(entries, map, i, item);
-    map[entries[i].key] = item;
+  Iterator<MapEntry<Object?, Object?>> entries = value.entries.iterator;
+  while (entries.moveNext()) {
+    MapEntry<Object?, Object?> entry = entries.current;
+    FutureOr<Object?> item = _resolve(entry.value);
+    if (item is Future<Object?>) {
+      // copy the rest before the first await, so a change to [value]
+      // while it waits can not break the loop
+      List<MapEntry<Object?, Object?>> rest = <MapEntry<Object?, Object?>>[];
+      while (entries.moveNext()) {
+        rest.add(entries.current);
+      }
+      return _waitMap(rest, map, entry.key, item);
+    }
+    map[entry.key] = item;
   }
   return map;
 }
 
 Future<Object?> _waitMap(
-  List<MapEntry<Object?, Object?>> entries,
+  List<MapEntry<Object?, Object?>> rest,
   Map<Object?, Object?> map,
-  int i,
+  Object? key,
   Future<Object?> item,
 ) async {
-  map[entries[i].key] = await item;
-  for (i++; i < entries.length; i++) {
-    FutureOr<Object?> next = _resolve(entries[i].value);
-    map[entries[i].key] = next is Future<Object?> ? await next : next;
+  map[key] = await item;
+  for (MapEntry<Object?, Object?> entry in rest) {
+    FutureOr<Object?> next = _resolve(entry.value);
+    map[entry.key] = next is Future<Object?> ? await next : next;
   }
   return map;
 }

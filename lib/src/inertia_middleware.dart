@@ -44,7 +44,11 @@ class InertiaMiddleware implements IDoxNextMiddleware {
     if (stale != null) return stale;
     Inertia.share(req, await share(req));
     DoxResponse res = await next();
-    if (Inertia.isInertia(req) && _isEmpty(res)) res = back(req);
+    if (Inertia.isInertia(req) && _isEmpty(res)) {
+      // change this answer, not a new one, so the headers and cookies
+      // that the controller set on it are kept
+      res.statusCode(302).withHeaders(back(req).headers);
+    }
     if (res.status == 302 &&
         Inertia.isInertia(req) &&
         const <String>['PUT', 'PATCH', 'DELETE'].contains(req.method)) {

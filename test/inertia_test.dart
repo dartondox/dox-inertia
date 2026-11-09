@@ -85,6 +85,11 @@ class InertiaRouter extends Router {
     });
     Route.get('/empty', (DoxRequest req) => null);
     Route.put('/empty', (DoxRequest req) => '');
+    Route.post('/empty-kept', (DoxRequest req) {
+      return response('')
+          .header('X-Kept', 'yes')
+          .cookie(DoxCookie('kept', '1', encrypt: false));
+    });
     Route.get('/counted', (DoxRequest req) {
       calls++;
       return inertia(req, 'Counted');
@@ -455,6 +460,16 @@ void main() {
         '/empty',
         headers: <String, String>{...inertiaHeaders, 'Referer': '/users'},
       )).expectStatus(303).expectHeader('location', '/users');
+    });
+
+    test('an empty 200 keeps its headers and cookies', () async {
+      TestResponse res = await client.post(
+        '/empty-kept',
+        headers: <String, String>{...inertiaHeaders, 'Referer': '/users'},
+      );
+      res.expectStatus(302).expectHeader('location', '/users');
+      res.expectHeader('x-kept', 'yes');
+      expect(res.cookies['kept'], '1');
     });
 
     test('an empty 200 never goes back to another site', () async {
