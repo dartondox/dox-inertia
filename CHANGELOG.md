@@ -1,3 +1,7 @@
+## Unreleased
+
+- Fix: an empty `200` in an Inertia request is sent back to the page it came from. The redirect lost the headers and cookies that the controller set on the empty answer. They are now kept.
+
 ## 3.1.0
 
 - `Inertia.render(req, component, props)` does the same as `inertia(...)`. `Inertia.lazy` does the same as `Inertia.optional`.
