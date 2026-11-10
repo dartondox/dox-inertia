@@ -63,3 +63,16 @@ class InertiaMiddleware implements IDoxNextMiddleware {
     return (res.status ?? 200) == 200 && (content == null || content == '');
   }
 }
+
+/// Turns on history encryption for every page of a router. Add it to
+/// the `middleware` of the router. It does the same as
+/// `Inertia.encryptHistory(req)` in each controller.
+class EncryptHistoryMiddleware implements IDoxNextMiddleware {
+  const EncryptHistoryMiddleware();
+
+  @override
+  Future<DoxResponse> handle(DoxRequest req, Next next) {
+    Inertia.encryptHistory(req);
+    return next();
+  }
+}
