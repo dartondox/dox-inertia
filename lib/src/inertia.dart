@@ -424,6 +424,9 @@ class Inertia {
   /// Use the HTML file at [path] as the root view of this request, in
   /// place of `InertiaConfig.rootView`. Eg. another layout for an admin
   /// area. `RootViewMiddleware` does it for a router.
+  ///
+  /// Use a fixed [path]. Never pass a value from the request: it could
+  /// show any file of the server as the page.
   /// ```
   /// Inertia.setRootView(req, 'resources/views/admin.html');
   /// return inertia(req, 'Admin/Home');
