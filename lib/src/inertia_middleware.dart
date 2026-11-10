@@ -76,3 +76,24 @@ class EncryptHistoryMiddleware implements IDoxNextMiddleware {
     return next();
   }
 }
+
+/// Sets the root view for every page of a router, eg. an admin area.
+/// Add it to the `middleware` of the router. It does the same as
+/// `Inertia.setRootView(req, path)` in each controller.
+///
+/// Use a fixed path. Never pass a value from the request.
+/// ```
+/// const RootViewMiddleware('resources/views/admin.html')
+/// ```
+class RootViewMiddleware implements IDoxNextMiddleware {
+  const RootViewMiddleware(this.path);
+
+  /// The HTML file of the root view.
+  final String path;
+
+  @override
+  Future<DoxResponse> handle(DoxRequest req, Next next) {
+    Inertia.setRootView(req, path);
+    return next();
+  }
+}

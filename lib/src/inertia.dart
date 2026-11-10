@@ -71,7 +71,7 @@ Future<DoxResponse> inertia(
   }
 
   InertiaConfig config = Inertia.config;
-  String root = await FileCache.read(config.rootView);
+  String root = await FileCache.read(Inertia._rootView[req] ?? config.rootView);
   String json = _encode(page);
   SsrPage? ssr = await config.ssr?.render(json);
   String html = Inertia._fill(
@@ -79,6 +79,7 @@ Future<DoxResponse> inertia(
     await Vite(config).tags(),
     ssr?.body ?? _root(json),
     ssr?.head ?? '',
+    req,
   );
   return response(html)
       .contentType(ContentType.html)
@@ -313,6 +314,9 @@ class Inertia {
   static final Map<String, dynamic> _global = <String, dynamic>{};
   static final Expando<bool> _encrypt = Expando<bool>();
   static final Expando<bool> _clear = Expando<bool>();
+  static final Expando<String> _rootView = Expando<String>();
+  static final Expando<Map<String, Object?>> _viewData =
+      Expando<Map<String, Object?>>();
 
   /// Use [config] in this isolate. `InertiaProvider` calls it.
   /// With no call, the defaults of `InertiaConfig` are used.
@@ -417,16 +421,57 @@ class Inertia {
     return response('').statusCode(302).header(HttpHeaders.locationHeader, url);
   }
 
+  /// Use the HTML file at [path] as the root view of this request, in
+  /// place of `InertiaConfig.rootView`. Eg. another layout for an admin
+  /// area. `RootViewMiddleware` does it for a router.
+  ///
+  /// Use a fixed [path]. Never pass a value from the request: it could
+  /// show any file of the server as the page.
+  /// ```
+  /// Inertia.setRootView(req, 'resources/views/admin.html');
+  /// return inertia(req, 'Admin/Home');
+  /// ```
+  static void setRootView(DoxRequest req, String path) {
+    _rootView[req] = path;
+  }
+
+  /// Give [data] to the root view of this request. `{{ key }}` in the
+  /// root view becomes the value, HTML escaped. The data is not a page
+  /// prop: it is never sent to the browser as JSON. A later call adds
+  /// to the data, and the same key wins.
+  ///
+  /// A key has letters, digits and `_`. `{{ key }}` with a key that is
+  /// not in the data stays as it is. `{{ csrfToken }}` is filled with
+  /// the CSRF token of the session when the request has a session.
+  /// ```
+  /// Inertia.withViewData(req, <String, Object?>{'title': 'Users'});
+  /// return inertia(req, 'Users/Index');
+  /// ```
+  static void withViewData(DoxRequest req, Map<String, Object?> data) {
+    _viewData[req] = <String, Object?>{...?_viewData[req], ...data};
+  }
+
   static final RegExp _headEnd = RegExp('</head>', caseSensitive: false);
+  static final RegExp _placeholder = RegExp(r'\{\{\s*([A-Za-z0-9_]+)\s*\}\}');
+  static const HtmlEscape _escape = HtmlEscape(
+    HtmlEscapeMode(escapeLtGt: true, escapeQuot: true, escapeApos: true),
+  );
 
   /// The [root] view with the Vite [tags] in place of the first `@vite`,
-  /// the [body] in place of the first `@inertia`, and the SSR [head]
-  /// tags right before the first `</head>` (in any case).
+  /// the [body] in place of the first `@inertia`, the SSR [head] tags
+  /// right before the first `</head>` (in any case), and each
+  /// `{{ key }}` of the view data of [req] replaced by its value.
   ///
-  /// The three places are found in [root] before anything is put in.
-  /// So text that is put in, like a prop or a title with `@inertia` or
-  /// `</head>` in it, is never read as a mark.
-  static String _fill(String root, String tags, String body, String head) {
+  /// All places are found in [root] before anything is put in.
+  /// So text that is put in, like a prop or a title with `@inertia`,
+  /// `</head>` or `{{ key }}` in it, is never read as a mark.
+  static String _fill(
+    String root,
+    String tags,
+    String body,
+    String head,
+    DoxRequest req,
+  ) {
     // the place in [root] gives the text to put there, and how much of
     // [root] it replaces. Sorted by place.
     SplayTreeMap<int, (int, String)> parts = SplayTreeMap<int, (int, String)>();
@@ -436,6 +481,27 @@ class Inertia {
     if (inertia >= 0) parts[inertia] = ('@inertia'.length, body);
     int headEnd = head.isEmpty ? -1 : root.indexOf(_headEnd);
     if (headEnd >= 0) parts[headEnd] = (0, '$head\n');
+    // a root view with no `{{` (the normal case) skips the search
+    if (root.contains('{{')) {
+      Map<String, Object?> data = _viewData[req] ?? const <String, Object?>{};
+      for (RegExpMatch match in _placeholder.allMatches(root)) {
+        String key = match[1]!;
+        Object? value;
+        if (data.containsKey(key)) {
+          value = data[key];
+        } else if (key == 'csrfToken' && req.hasSession) {
+          // read only when the root view asks for it: the session
+          // makes the token on first use
+          value = req.session.token;
+        } else {
+          continue;
+        }
+        parts[match.start] = (
+          match.end - match.start,
+          value == null ? '' : _escape.convert('$value'),
+        );
+      }
+    }
 
     StringBuffer html = StringBuffer();
     int at = 0;

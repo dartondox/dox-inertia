@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `Inertia.withViewData(req, data)`: values for the root view. `{{ key }}` in the root view becomes the value, HTML escaped. Use it for the `<title>` or meta tags of the first page load. The values are not page props and are never sent as JSON. `{{ key }}` with a key that is not set stays as it is, so a root view with no view data gives the same HTML as before.
+- `{{ csrfToken }}` in the root view is filled with the CSRF token of the session, when the request has a session. So `<meta name="csrf-token" content="{{ csrfToken }}">` works with no code.
+- `Inertia.setRootView(req, path)` uses another root view file for one request, eg. for an admin area. `RootViewMiddleware(path)` does it for a router.
 - Server side rendering (SSR): set `ssr: InertiaSsr()` in `InertiaConfig`. On a first visit, Dox sends the page to the Inertia SSR server (default `http://127.0.0.1:13714/render`). The HTML of the answer goes in place of `@inertia`, and its head tags go right before the first `</head>`. When the SSR server is down, too slow (`timeout`, default 2 seconds, then the request is stopped) or gives a bad answer, the normal page is sent, with one warning. A `url` that is not a full `http` or `https` url gives an error when the app starts. SSR is off by default. You run the Node process yourself.
 - History encryption: `encryptHistory: true` in `InertiaConfig` turns it on for all pages. `Inertia.encryptHistory(req)` and `Inertia.encryptHistory(req, false)` set it for one page. `EncryptHistoryMiddleware` turns it on for a router.
 - `Inertia.clearHistory(req)`: the next Inertia page carries `clearHistory: true`, once. It is kept in the session, so it works before a redirect. With no session, it only works when the same request renders a page.
