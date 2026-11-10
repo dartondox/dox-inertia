@@ -201,6 +201,7 @@ class UserController {
 
 A prop can be a function, like `users` above. It runs only when the prop is sent. It can give a `Future`.
 Props become JSON. A model or any object with `toJson()` works. A `DateTime` becomes ISO text.
+A Dart `int` above 2^53 in a prop loses precision. JavaScript reads the page JSON, in the browser and on the SSR server. Send such a number as a string.
 `Inertia.render(req, 'Users/Index', {...})` does the same as `inertia(...)`.
 
 ## Shared props
@@ -532,7 +533,9 @@ With no `ssr`, SSR is off. `InertiaSsr` has two options:
 | Option | Default | What it does |
 | --- | --- | --- |
 | `url` | `http://127.0.0.1:13714/render` | the render url of the SSR server |
-| `timeout` | 2 seconds | how long Dox waits for the answer |
+| `timeout` | 2 seconds | how long Dox waits for the answer. Then it stops the request. |
+
+The `url` must be a full `http` or `https` url. A wrong url gives an error when the app starts.
 
 To use SSR only in production, set it from the env:
 
@@ -545,7 +548,7 @@ ssr: Env.get<String>('APP_ENV') == 'production' ? InertiaSsr() : null,
 The root view needs no change. It must have `@inertia` and a `</head>` tag.
 
 - The HTML from the SSR server goes in place of `@inertia`. It holds the page data and the rendered `<div id="app">`.
-- The head tags of the page (from the `<Head>` component, like `<title>`) go right before `</head>`. A root view with no `</head>` gets no head tags.
+- The head tags of the page (from the `<Head>` component, like `<title>`) go right before the first `</head>`. `</HEAD>` works too. A root view with no `</head>` gets no head tags.
 
 When your pages set a title with `<Head>`, remove the `<title>` from the root view, so the page does not have two.
 

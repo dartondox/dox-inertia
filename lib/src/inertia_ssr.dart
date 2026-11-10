@@ -17,14 +17,37 @@ import 'package:http/http.dart' as http;
 /// When the SSR server does not answer in time, or gives a bad answer,
 /// the visitor gets the normal page, and the browser renders it.
 class InertiaSsr {
+  /// Throws an [ArgumentError] when [url] is not a full http or https
+  /// url. So a wrong url stops the app at boot, not on the first visit.
   InertiaSsr({
     this.url = 'http://127.0.0.1:13714/render',
     this.timeout = const Duration(seconds: 2),
     this._client,
-  });
+    this._log,
+  }) : _uri = _parse(url);
 
   /// The render url of the SSR server.
   final String url;
+
+  final Uri _uri;
+
+  /// Where the warnings go. Default: stderr. Tests pass a buffer.
+  final StringSink? _log;
+
+  static Uri _parse(String url) {
+    Uri? uri = Uri.tryParse(url);
+    if (uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty) {
+      return uri;
+    }
+    throw ArgumentError.value(
+      url,
+      'url',
+      'The url of InertiaSsr must be a full http or https url, like '
+          'http://127.0.0.1:13714/render',
+    );
+  }
 
   /// How long to wait for the SSR server.
   final Duration timeout;
@@ -38,16 +61,18 @@ class InertiaSsr {
   /// Render the page [json] on the SSR server. Null when it fails: then
   /// the caller sends the normal page.
   Future<SsrPage?> render(String json) async {
+    // at the timeout the request is aborted, so a hung SSR server does
+    // not keep one open socket per visit
+    Completer<void> abort = Completer<void>();
+    Timer timer = Timer(timeout, abort.complete);
     try {
-      http.Response res = await (_client ??= http.Client())
-          .post(
-            Uri.parse(url),
-            headers: const <String, String>{
-              HttpHeaders.contentTypeHeader: 'application/json',
-            },
-            body: json,
-          )
-          .timeout(timeout);
+      http.AbortableRequest request =
+          http.AbortableRequest('POST', _uri, abortTrigger: abort.future)
+            ..headers[HttpHeaders.contentTypeHeader] = 'application/json'
+            ..body = json;
+      // timeout() too: a client that can not abort must not make the
+      // visitor wait
+      http.Response res = await _send(request).timeout(timeout);
       if (res.statusCode != 200) return _fail('status ${res.statusCode}');
       Object? data = jsonDecode(utf8.decode(res.bodyBytes));
       Object? body = data is Map ? data['body'] : null;
@@ -56,8 +81,19 @@ class InertiaSsr {
       _failed = false;
       return SsrPage(head is List ? head.join('\n') : '', body);
     } on Exception catch (error) {
+      if (abort.isCompleted) {
+        return _fail('no answer in ${timeout.inMilliseconds} ms');
+      }
       return _fail(error);
+    } finally {
+      timer.cancel();
     }
+  }
+
+  Future<http.Response> _send(http.BaseRequest request) async {
+    return http.Response.fromStream(
+      await (_client ??= http.Client()).send(request),
+    );
   }
 
   /// Close the client. `InertiaProvider` calls it when the app stops.
@@ -71,7 +107,7 @@ class InertiaSsr {
   SsrPage? _fail(Object reason) {
     if (!_failed) {
       _failed = true;
-      stderr.writeln(
+      (_log ?? stderr).writeln(
         'dox_inertia: SSR failed at $url ($reason). Pages are sent '
         'without SSR until the SSR server works again.',
       );

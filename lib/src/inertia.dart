@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -71,17 +72,14 @@ Future<DoxResponse> inertia(
 
   InertiaConfig config = Inertia.config;
   String root = await FileCache.read(config.rootView);
-  // @vite first: a prop can hold the text "@vite", the tags can not
-  // hold "@inertia"
   String json = _encode(page);
   SsrPage? ssr = await config.ssr?.render(json);
-  String html = root
-      .replaceFirst('@vite', await Vite(config).tags())
-      .replaceFirst('@inertia', ssr?.body ?? _root(json));
-  if (ssr != null && ssr.head.isNotEmpty) {
-    // last, so the first `</head>` is still the one of the root view
-    html = html.replaceFirst('</head>', '${ssr.head}\n</head>');
-  }
+  String html = Inertia._fill(
+    root,
+    await Vite(config).tags(),
+    ssr?.body ?? _root(json),
+    ssr?.head ?? '',
+  );
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
@@ -417,6 +415,37 @@ class Inertia {
       return response('').statusCode(409).header('X-Inertia-Location', url);
     }
     return response('').statusCode(302).header(HttpHeaders.locationHeader, url);
+  }
+
+  static final RegExp _headEnd = RegExp('</head>', caseSensitive: false);
+
+  /// The [root] view with the Vite [tags] in place of the first `@vite`,
+  /// the [body] in place of the first `@inertia`, and the SSR [head]
+  /// tags right before the first `</head>` (in any case).
+  ///
+  /// The three places are found in [root] before anything is put in.
+  /// So text that is put in, like a prop or a title with `@inertia` or
+  /// `</head>` in it, is never read as a mark.
+  static String _fill(String root, String tags, String body, String head) {
+    // the place in [root] gives the text to put there, and how much of
+    // [root] it replaces. Sorted by place.
+    SplayTreeMap<int, (int, String)> parts = SplayTreeMap<int, (int, String)>();
+    int vite = root.indexOf('@vite');
+    if (vite >= 0) parts[vite] = ('@vite'.length, tags);
+    int inertia = root.indexOf('@inertia');
+    if (inertia >= 0) parts[inertia] = ('@inertia'.length, body);
+    int headEnd = head.isEmpty ? -1 : root.indexOf(_headEnd);
+    if (headEnd >= 0) parts[headEnd] = (0, '$head\n');
+
+    StringBuffer html = StringBuffer();
+    int at = 0;
+    for (MapEntry<int, (int, String)> part in parts.entries) {
+      html.write(root.substring(at, part.key));
+      html.write(part.value.$2);
+      at = part.key + part.value.$1;
+    }
+    html.write(root.substring(at));
+    return html.toString();
   }
 
   /// Encrypt the browser history of the page this request renders, or

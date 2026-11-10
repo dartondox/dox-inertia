@@ -154,6 +154,36 @@ class FakeSsr {
   }
 }
 
+/// a fake HTTP client that counts its calls. With [hang], a request
+/// waits until it is aborted, like a real client with a hung server.
+class CountingClient extends http.BaseClient {
+  CountingClient({this.hang = false});
+
+  final bool hang;
+  int sends = 0;
+  int aborted = 0;
+  int closes = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    sends++;
+    if (hang) {
+      await (request as http.Abortable).abortTrigger;
+      aborted++;
+      throw http.RequestAbortedException(request.url);
+    }
+    return http.StreamedResponse(
+      Stream<List<int>>.value(utf8.encode('{"head":[],"body":"<p>ok</p>"}')),
+      200,
+    );
+  }
+
+  @override
+  void close() {
+    closes++;
+  }
+}
+
 class SessionRouter extends Router {
   @override
   String get prefix => 's';
@@ -954,6 +984,122 @@ void main() {
         expect(fake.calls, 1);
       });
     }
+
+    test('a partial reload does not call the SSR server', () async {
+      FakeSsr fake = FakeSsr(ok);
+      configure(ssr: fake.ssr);
+      TestResponse res = await client.get(
+        '/users',
+        headers: <String, String>{
+          ...inertiaHeaders,
+          'X-Inertia-Partial-Component': 'Users/Index',
+          'X-Inertia-Partial-Data': 'stats',
+        },
+      );
+      expect(res.json['props']['stats'], <String, int>{'all': 9});
+      expect(fake.calls, 0);
+    });
+
+    test('the head goes at the root </head>, not at one in the body', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      Future<http.Response> tricky(http.Request request) async {
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'head': <String>['<title>@inertia @vite </head></title>'],
+            'body': '<div id="app">a </head> b @vite</div>',
+          }),
+          200,
+        );
+      }
+
+      try {
+        // no </head> in the root view: the one in the body is not used
+        await view.writeAsString('<main>@inertia</main>');
+        configure(ssr: FakeSsr(tricky).ssr);
+        expect(
+          (await client.get('/no-session')).body,
+          '<main><div id="app">a </head> b @vite</div></main>',
+        );
+        // any case, and the text of the head is not read as a mark
+        await view.writeAsString('<HEAD>@vite</HEAD><body>@inertia</body>');
+        configure(ssr: FakeSsr(tricky).ssr);
+        expect(
+          (await client.get('/no-session')).body,
+          '<HEAD>${await Vite(Inertia.config).tags()}'
+          '<title>@inertia @vite </head></title>\n</HEAD>'
+          '<body><div id="app">a </head> b @vite</div></body>',
+        );
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
+
+    test('the request is aborted at the timeout', () async {
+      CountingClient hung = CountingClient(hang: true);
+      StringBuffer log = StringBuffer();
+      InertiaSsr ssr = InertiaSsr(
+        timeout: const Duration(milliseconds: 50),
+        client: hung,
+        log: log,
+      );
+      expect(await ssr.render('{}'), isNull);
+      expect(hung.sends, 1);
+      expect(hung.aborted, 1);
+      expect(log.toString(), contains('no answer in 50 ms'));
+    });
+
+    test('a url with no scheme or host fails when it is made', () {
+      for (String url in <String>[
+        '127.0.0.1:13714/render',
+        '/render',
+        'ftp://127.0.0.1/render',
+        'http:///render',
+        '',
+      ]) {
+        expect(() => InertiaSsr(url: url), throwsArgumentError, reason: url);
+      }
+      expect(InertiaSsr(url: 'https://ssr.example.com/render').url, isNotEmpty);
+    });
+
+    test('one warning, then quiet until a render works again', () async {
+      bool down = true;
+      StringBuffer log = StringBuffer();
+      InertiaSsr ssr = InertiaSsr(
+        log: log,
+        client: MockClient((http.Request request) async {
+          if (down) throw const SocketException('Connection refused');
+          return ok(request);
+        }),
+      );
+      int warnings() => 'dox_inertia: SSR failed'.allMatches('$log').length;
+
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(warnings(), 1);
+      down = false;
+      expect((await ssr.render('{}'))!.body, rendered);
+      expect(warnings(), 1);
+      down = true;
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(warnings(), 2);
+    });
+
+    test('one client for all renders, shutdown closes it', () async {
+      CountingClient counting = CountingClient();
+      InertiaSsr ssr = InertiaSsr(client: counting);
+      InertiaProvider provider = InertiaProvider(InertiaConfig(ssr: ssr));
+      expect((await ssr.render('{}'))!.body, '<p>ok</p>');
+      expect((await ssr.render('{}'))!.body, '<p>ok</p>');
+      expect(counting.sends, 2);
+      expect(counting.closes, 0);
+      provider.shutdown();
+      expect(counting.closes, 1);
+      // an app with no SSR has nothing to close
+      InertiaProvider(const InertiaConfig()).shutdown();
+    });
 
     test('it works again after a failure', () async {
       bool down = true;
