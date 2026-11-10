@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:dox_core/dox_core.dart';
 import 'package:dox_core/testing.dart';
 import 'package:dox_inertia/dox_inertia.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 const Map<String, String> inertiaHeaders = <String, String>{
@@ -97,6 +99,88 @@ class InertiaRouter extends Router {
     Route.get('/no-session', (DoxRequest req) {
       return inertia(req, 'Plain');
     });
+    Route.get('/secret', (DoxRequest req) {
+      Inertia.encryptHistory(req);
+      return inertia(req, 'Secret', <String, dynamic>{
+        // slow, so another request runs while this one waits
+        'wait': () =>
+            Future<int>.delayed(const Duration(milliseconds: 50), () => 1),
+      });
+    });
+    Route.get('/open', (DoxRequest req) {
+      Inertia.encryptHistory(req, false);
+      return inertia(req, 'Open');
+    });
+    Route.get('/clear-now', (DoxRequest req) {
+      Inertia.clearHistory(req);
+      return inertia(req, 'Plain');
+    });
+  }
+}
+
+class EncryptedRouter extends Router {
+  @override
+  String get prefix => 'e';
+
+  @override
+  List<dynamic> get middleware => <dynamic>[const EncryptHistoryMiddleware()];
+
+  @override
+  void register() {
+    Route.get('/page', (DoxRequest req) => inertia(req, 'Plain'));
+  }
+}
+
+/// a fake SSR server: counts the calls and keeps the last page it got
+class FakeSsr {
+  FakeSsr(this.answer);
+
+  final Future<http.Response> Function(http.Request request) answer;
+  int calls = 0;
+  String? body;
+
+  InertiaSsr get ssr => InertiaSsr(
+    timeout: const Duration(milliseconds: 100),
+    client: MockClient(handle),
+  );
+
+  Future<http.Response> handle(http.Request request) {
+    calls++;
+    body = request.body;
+    expect(request.method, 'POST');
+    expect(request.url.toString(), 'http://127.0.0.1:13714/render');
+    expect(request.headers['content-type'], contains('application/json'));
+    return answer(request);
+  }
+}
+
+/// a fake HTTP client that counts its calls. With [hang], a request
+/// waits until it is aborted, like a real client with a hung server.
+class CountingClient extends http.BaseClient {
+  CountingClient({this.hang = false});
+
+  final bool hang;
+  int sends = 0;
+  int aborted = 0;
+  int closes = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    sends++;
+    if (hang) {
+      await (request as http.Abortable).abortTrigger;
+      aborted++;
+      throw http.RequestAbortedException(request.url);
+    }
+    return http.StreamedResponse(
+      Stream<List<int>>.value(utf8.encode('{"head":[],"body":"<p>ok</p>"}')),
+      200,
+    );
+  }
+
+  @override
+  void close() {
+    closes++;
   }
 }
 
@@ -126,6 +210,10 @@ class SessionRouter extends Router {
       return redirect('/s/form');
     }
 
+    Route.post('/logout', (DoxRequest req) {
+      Inertia.clearHistory(req);
+      return redirect('/s/form');
+    });
     Route.post('/form', save);
     Route.put('/form', save);
   }
@@ -171,21 +259,26 @@ void main() {
     client = await DoxTestClient.start(
       AppConfig(
         appKey: '4HyiSrq4N5Nfg6bOadIhbFEI8zbUkpxt',
-        routers: <Router>[InertiaRouter(), SessionRouter()],
+        routers: <Router>[InertiaRouter(), SessionRouter(), EncryptedRouter()],
       ),
     );
   });
 
-  setUp(() {
+  /// the config of the tests, with [encryptHistory] and [ssr] when given
+  void configure({bool encryptHistory = false, InertiaSsr? ssr}) {
     Inertia.configure(
       InertiaConfig(
         rootView: '${dir.path}/app.html',
         publicPath: '${dir.path}/public',
         devServerUrl: 'http://localhost:5173/',
         version: '1',
+        encryptHistory: encryptHistory,
+        ssr: ssr,
       ),
     );
-  });
+  }
+
+  setUp(configure);
 
   tearDownAll(() async {
     await client.close();
@@ -669,6 +762,385 @@ void main() {
         headers: inertiaHeaders,
       );
       expect(page.json['flash'], <String, dynamic>{'message': 'Saved'});
+    });
+  });
+
+  group('history encryption', () {
+    test('default config: the HTML is the same as with no feature', () async {
+      TestResponse res = await client.get('/no-session');
+      expect(
+        res.body,
+        '<html><head>${await Vite(Inertia.config).tags()}</head><body>'
+        '<script data-page="app" type="application/json">'
+        '{"component":"Plain","url":"/no-session","version":"1",'
+        '"clearHistory":false,"encryptHistory":false,'
+        '"props":{"app":"Dox","title":"shared"},'
+        '"sharedProps":["app","title"]}</script>'
+        '<div id="app"></div></body></html>',
+      );
+    });
+
+    test('encryptHistory is false by default', () async {
+      TestResponse res = await client.get('/users', headers: inertiaHeaders);
+      expect(res.json['encryptHistory'], false);
+      expect(res.json['clearHistory'], false);
+    });
+
+    test('the config turns it on, one request turns it off', () async {
+      configure(encryptHistory: true);
+      TestResponse on = await client.get('/users', headers: inertiaHeaders);
+      expect(on.json['encryptHistory'], true);
+      TestResponse off = await client.get('/open', headers: inertiaHeaders);
+      expect(off.json['encryptHistory'], false);
+    });
+
+    test('one request turns it on', () async {
+      TestResponse res = await client.get('/secret', headers: inertiaHeaders);
+      expect(res.json['encryptHistory'], true);
+    });
+
+    test('EncryptHistoryMiddleware turns it on for a router', () async {
+      TestResponse res = await client.get('/e/page', headers: inertiaHeaders);
+      expect(res.json['encryptHistory'], true);
+    });
+
+    test(
+      'it does not leak into a request that runs at the same time',
+      () async {
+        List<TestResponse> all = await Future.wait(<Future<TestResponse>>[
+          client.get('/secret', headers: inertiaHeaders),
+          client.get('/users', headers: inertiaHeaders),
+          client.get('/clear-now', headers: inertiaHeaders),
+        ]);
+        expect(all[0].json['encryptHistory'], true);
+        expect(all[0].json['clearHistory'], false);
+        expect(all[1].json['encryptHistory'], false);
+        expect(all[1].json['clearHistory'], false);
+        expect(all[2].json['encryptHistory'], false);
+        expect(all[2].json['clearHistory'], true);
+        // and not into a later request
+        TestResponse later = await client.get(
+          '/users',
+          headers: inertiaHeaders,
+        );
+        expect(later.json['encryptHistory'], false);
+        expect(later.json['clearHistory'], false);
+      },
+    );
+
+    test('clearHistory lives through a redirect and is sent once', () async {
+      Browser browser = Browser(client);
+      TestResponse first = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(first.json['clearHistory'], false);
+      TestResponse post = await browser.send(
+        'POST',
+        '/s/logout',
+        headers: browser.formHeaders,
+      );
+      post.expectStatus(302).expectHeader('location', '/s/form');
+
+      TestResponse page = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(page.json['clearHistory'], true);
+      TestResponse again = await browser.send(
+        'GET',
+        '/s/form',
+        headers: inertiaHeaders,
+      );
+      expect(again.json['clearHistory'], false);
+    });
+
+    test('clearHistory is kept when the next request gets a 409', () async {
+      Browser browser = Browser(client);
+      await browser.send('GET', '/s/form', headers: inertiaHeaders);
+      await browser.send('POST', '/s/logout', headers: browser.formHeaders);
+      TestResponse stale = await browser.send(
+        'GET',
+        '/s/form',
+        headers: <String, String>{'X-Inertia': 'true'},
+      );
+      stale.expectStatus(409);
+      // the full page load after the 409
+      TestResponse page = await browser.send('GET', '/s/form');
+      expect(page.body, contains('"clearHistory":true'));
+    });
+
+    test('no session: clearHistory is for this response only', () async {
+      TestResponse res = await client.get(
+        '/clear-now',
+        headers: inertiaHeaders,
+      );
+      expect(res.json['clearHistory'], true);
+      expect(res.cookies, isEmpty);
+      TestResponse next = await client.get(
+        '/no-session',
+        headers: inertiaHeaders,
+      );
+      expect(next.json['clearHistory'], false);
+    });
+  });
+
+  group('ssr', () {
+    const String plain = '<div id="app"></div>';
+    const String rendered =
+        '<script data-page="app" type="application/json">{}</script>'
+        '<div data-server-rendered="true" id="app"><h1>\u00e9 @vite</h1></div>';
+
+    Future<http.Response> ok(http.Request request) async {
+      return http.Response.bytes(
+        utf8.encode(
+          jsonEncode(<String, dynamic>{
+            'head': <String>['<title>Users</title>', '<meta name="a">'],
+            'body': rendered,
+          }),
+        ),
+        200,
+      );
+    }
+
+    test('puts the head before </head> and the body at @inertia', () async {
+      FakeSsr fake = FakeSsr(ok);
+      configure(ssr: fake.ssr);
+      TestResponse res = await client.get('/no-session');
+      res.expectStatus(200).expectHeader('vary', 'X-Inertia');
+      expect(
+        res.body,
+        '<html><head>${await Vite(Inertia.config).tags()}'
+        '<title>Users</title>\n<meta name="a">\n</head>'
+        '<body>$rendered</body></html>',
+      );
+      expect(fake.calls, 1);
+      // the SSR server gets the page object as JSON
+      Map<String, dynamic> page =
+          jsonDecode(fake.body!) as Map<String, dynamic>;
+      expect(page['component'], 'Plain');
+      expect(page['url'], '/no-session');
+      expect(page['props'], <String, dynamic>{'app': 'Dox', 'title': 'shared'});
+      expect(page['encryptHistory'], false);
+    });
+
+    test('an Inertia request does not call the SSR server', () async {
+      FakeSsr fake = FakeSsr(ok);
+      configure(ssr: fake.ssr);
+      TestResponse res = await client.get('/users', headers: inertiaHeaders);
+      expect(res.json['component'], 'Users/Index');
+      expect(fake.calls, 0);
+    });
+
+    test('a root view with no </head> gets the body only', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      try {
+        await view.writeAsString('<main>@inertia</main>');
+        configure(ssr: FakeSsr(ok).ssr);
+        TestResponse res = await client.get('/no-session');
+        expect(res.body, '<main>$rendered</main>');
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
+
+    Map<String, Future<http.Response> Function(http.Request)> failures =
+        <String, Future<http.Response> Function(http.Request)>{
+          'server down': (http.Request request) async {
+            throw const SocketException('Connection refused');
+          },
+          'timeout': (http.Request request) {
+            return Future<http.Response>.delayed(
+              const Duration(seconds: 1),
+              () => http.Response('{"head":[],"body":"<p>late</p>"}', 200),
+            );
+          },
+          'status 500': (http.Request request) async {
+            return http.Response('{"head":[],"body":"<p>bad</p>"}', 500);
+          },
+          'bad JSON': (http.Request request) async {
+            return http.Response('<html>oops', 200);
+          },
+          'JSON with no body': (http.Request request) async {
+            return http.Response('{"head":["<title>x</title>"]}', 200);
+          },
+          'JSON that is not a map': (http.Request request) async {
+            return http.Response('[1]', 200);
+          },
+        };
+    for (MapEntry<String, Future<http.Response> Function(http.Request)> failure
+        in failures.entries) {
+      test('${failure.key}: the normal page is sent', () async {
+        String normal = (await client.get('/no-session')).body;
+        expect(normal, contains(plain));
+        FakeSsr fake = FakeSsr(failure.value);
+        configure(ssr: fake.ssr);
+        TestResponse res = await client.get('/no-session');
+        res.expectStatus(200);
+        expect(res.body, normal);
+        expect(fake.calls, 1);
+      });
+    }
+
+    test('a partial reload does not call the SSR server', () async {
+      FakeSsr fake = FakeSsr(ok);
+      configure(ssr: fake.ssr);
+      TestResponse res = await client.get(
+        '/users',
+        headers: <String, String>{
+          ...inertiaHeaders,
+          'X-Inertia-Partial-Component': 'Users/Index',
+          'X-Inertia-Partial-Data': 'stats',
+        },
+      );
+      expect(res.json['props']['stats'], <String, int>{'all': 9});
+      expect(fake.calls, 0);
+    });
+
+    test('the head goes at the root </head>, not at one in the body', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      Future<http.Response> tricky(http.Request request) async {
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'head': <String>['<title>@inertia @vite </head></title>'],
+            'body': '<div id="app">a </head> b @vite</div>',
+          }),
+          200,
+        );
+      }
+
+      try {
+        // no </head> in the root view: the one in the body is not used
+        await view.writeAsString('<main>@inertia</main>');
+        configure(ssr: FakeSsr(tricky).ssr);
+        expect(
+          (await client.get('/no-session')).body,
+          '<main><div id="app">a </head> b @vite</div></main>',
+        );
+        // any case, and the text of the head is not read as a mark
+        await view.writeAsString('<HEAD>@vite</HEAD><body>@inertia</body>');
+        configure(ssr: FakeSsr(tricky).ssr);
+        expect(
+          (await client.get('/no-session')).body,
+          '<HEAD>${await Vite(Inertia.config).tags()}'
+          '<title>@inertia @vite </head></title>\n</HEAD>'
+          '<body><div id="app">a </head> b @vite</div></body>',
+        );
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
+
+    test('each mark is filled by its place in the root view', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      try {
+        configure(ssr: FakeSsr(ok).ssr);
+        String tags = await Vite(Inertia.config).tags();
+        const String head = '<title>Users</title>\n<meta name="a">\n';
+        // @inertia before </head>
+        await view.writeAsString('<head>@inertia @vite</head>');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$rendered $tags$head</head>',
+        );
+        // no @vite
+        await view.writeAsString('<head></head><body>@inertia</body>');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$head</head><body>$rendered</body>',
+        );
+        // two @inertia: the second stays as text
+        await view.writeAsString('<head>@vite</head>@inertia @inertia');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$tags$head</head>$rendered @inertia',
+        );
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
+
+    test('the request is aborted at the timeout', () async {
+      CountingClient hung = CountingClient(hang: true);
+      StringBuffer log = StringBuffer();
+      InertiaSsr ssr = InertiaSsr(
+        timeout: const Duration(milliseconds: 50),
+        client: hung,
+        log: log,
+      );
+      expect(await ssr.render('{}'), isNull);
+      expect(hung.sends, 1);
+      expect(hung.aborted, 1);
+      expect(log.toString(), contains('no answer in 50 ms'));
+    });
+
+    test('a url with no scheme or host fails when it is made', () {
+      for (String url in <String>[
+        '127.0.0.1:13714/render',
+        '/render',
+        'ftp://127.0.0.1/render',
+        'http:///render',
+        '',
+      ]) {
+        expect(() => InertiaSsr(url: url), throwsArgumentError, reason: url);
+      }
+      expect(InertiaSsr(url: 'https://ssr.example.com/render').url, isNotEmpty);
+    });
+
+    test('one warning, then quiet until a render works again', () async {
+      bool down = true;
+      StringBuffer log = StringBuffer();
+      InertiaSsr ssr = InertiaSsr(
+        log: log,
+        client: MockClient((http.Request request) async {
+          if (down) throw const SocketException('Connection refused');
+          return ok(request);
+        }),
+      );
+      int warnings() => 'dox_inertia: SSR failed'.allMatches('$log').length;
+
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(warnings(), 1);
+      down = false;
+      expect((await ssr.render('{}'))!.body, rendered);
+      expect(warnings(), 1);
+      down = true;
+      expect(await ssr.render('{}'), isNull);
+      expect(await ssr.render('{}'), isNull);
+      expect(warnings(), 2);
+    });
+
+    test('one client for all renders, shutdown closes it', () async {
+      CountingClient counting = CountingClient();
+      InertiaSsr ssr = InertiaSsr(client: counting);
+      InertiaProvider provider = InertiaProvider(InertiaConfig(ssr: ssr));
+      expect((await ssr.render('{}'))!.body, '<p>ok</p>');
+      expect((await ssr.render('{}'))!.body, '<p>ok</p>');
+      expect(counting.sends, 2);
+      expect(counting.closes, 0);
+      provider.shutdown();
+      expect(counting.closes, 1);
+      // an app with no SSR has nothing to close
+      InertiaProvider(const InertiaConfig()).shutdown();
+    });
+
+    test('it works again after a failure', () async {
+      bool down = true;
+      FakeSsr fake = FakeSsr((http.Request request) async {
+        if (down) throw const SocketException('Connection refused');
+        return ok(request);
+      });
+      configure(ssr: fake.ssr);
+      expect((await client.get('/no-session')).body, contains(plain));
+      down = false;
+      expect((await client.get('/no-session')).body, contains(rendered));
     });
   });
 

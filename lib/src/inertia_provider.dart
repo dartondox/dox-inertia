@@ -19,4 +19,9 @@ class InertiaProvider extends DoxProvider {
   void setup() {
     Inertia.configure(config);
   }
+
+  @override
+  void shutdown() {
+    config.ssr?.close();
+  }
 }

@@ -1,3 +1,5 @@
+import 'inertia_ssr.dart';
+
 /// The settings of `dox_inertia`. Paths are from the folder where the
 /// app runs (the project root).
 /// ```
@@ -15,6 +17,8 @@ class InertiaConfig {
     this.devServerUrl,
     this.reactRefresh = false,
     this.version,
+    this.encryptHistory = false,
+    this.ssr,
   });
 
   /// The HTML page of the first visit. Dox puts the page data in place of
@@ -46,4 +50,12 @@ class InertiaConfig {
   /// The asset version. When it changes, the browser loads the whole page
   /// again. Default: a hash of the Vite manifest file.
   final String? version;
+
+  /// Encrypt the browser history of every page. One request can change
+  /// it with `Inertia.encryptHistory(req, false)`.
+  final bool encryptHistory;
+
+  /// Server side rendering. Null (the default) turns it off. See
+  /// [InertiaSsr].
+  final InertiaSsr? ssr;
 }

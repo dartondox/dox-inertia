@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,7 @@ import 'package:dox_core/dox_core.dart';
 import 'file_cache.dart';
 import 'inertia_config.dart';
 import 'inertia_props.dart';
+import 'inertia_ssr.dart';
 import 'vite.dart';
 
 /// Render the page [component] (eg. `Users/Index`) with [props].
@@ -39,17 +41,23 @@ Future<DoxResponse> inertia(
 
   Map<String, dynamic> shared = Inertia.shared(req);
   Object? flash = req.hasSession ? req.session.pull(Inertia.flashKey) : null;
+  Map<String, dynamic> resolved = await _props(
+    req,
+    component,
+    <String, dynamic>{
+      if (req.hasSession) 'errors': AlwaysProp(_errors(req)),
+      ...shared,
+      ...props,
+    },
+  );
   Map<String, dynamic> page = <String, dynamic>{
     'component': component,
     'url': url,
     'version': version,
-    'clearHistory': false,
-    'encryptHistory': false,
-    ...await _props(req, component, <String, dynamic>{
-      if (req.hasSession) 'errors': AlwaysProp(_errors(req)),
-      ...shared,
-      ...props,
-    }),
+    // read after the props: a prop function can call these too
+    'clearHistory': Inertia._takeClearHistory(req),
+    'encryptHistory': Inertia._encrypt[req] ?? Inertia.config.encryptHistory,
+    ...resolved,
     // the client keeps these props on an instant visit
     if (shared.isNotEmpty) 'sharedProps': shared.keys.toList(),
     if (flash is Map && flash.isNotEmpty) 'flash': flash,
@@ -64,11 +72,14 @@ Future<DoxResponse> inertia(
 
   InertiaConfig config = Inertia.config;
   String root = await FileCache.read(config.rootView);
-  // @vite first: a prop can hold the text "@vite", the tags can not
-  // hold "@inertia"
-  String html = root
-      .replaceFirst('@vite', await Vite(config).tags())
-      .replaceFirst('@inertia', _root(_encode(page)));
+  String json = _encode(page);
+  SsrPage? ssr = await config.ssr?.render(json);
+  String html = Inertia._fill(
+    root,
+    await Vite(config).tags(),
+    ssr?.body ?? _root(json),
+    ssr?.head ?? '',
+  );
   return response(html)
       .contentType(ContentType.html)
       .header(HttpHeaders.varyHeader, 'X-Inertia');
@@ -300,6 +311,8 @@ class Inertia {
   static final Expando<Map<String, dynamic>> _shared =
       Expando<Map<String, dynamic>>();
   static final Map<String, dynamic> _global = <String, dynamic>{};
+  static final Expando<bool> _encrypt = Expando<bool>();
+  static final Expando<bool> _clear = Expando<bool>();
 
   /// Use [config] in this isolate. `InertiaProvider` calls it.
   /// With no call, the defaults of `InertiaConfig` are used.
@@ -402,6 +415,75 @@ class Inertia {
       return response('').statusCode(409).header('X-Inertia-Location', url);
     }
     return response('').statusCode(302).header(HttpHeaders.locationHeader, url);
+  }
+
+  static final RegExp _headEnd = RegExp('</head>', caseSensitive: false);
+
+  /// The [root] view with the Vite [tags] in place of the first `@vite`,
+  /// the [body] in place of the first `@inertia`, and the SSR [head]
+  /// tags right before the first `</head>` (in any case).
+  ///
+  /// The three places are found in [root] before anything is put in.
+  /// So text that is put in, like a prop or a title with `@inertia` or
+  /// `</head>` in it, is never read as a mark.
+  static String _fill(String root, String tags, String body, String head) {
+    // the place in [root] gives the text to put there, and how much of
+    // [root] it replaces. Sorted by place.
+    SplayTreeMap<int, (int, String)> parts = SplayTreeMap<int, (int, String)>();
+    int vite = root.indexOf('@vite');
+    if (vite >= 0) parts[vite] = ('@vite'.length, tags);
+    int inertia = root.indexOf('@inertia');
+    if (inertia >= 0) parts[inertia] = ('@inertia'.length, body);
+    int headEnd = head.isEmpty ? -1 : root.indexOf(_headEnd);
+    if (headEnd >= 0) parts[headEnd] = (0, '$head\n');
+
+    StringBuffer html = StringBuffer();
+    int at = 0;
+    for (MapEntry<int, (int, String)> part in parts.entries) {
+      html.write(root.substring(at, part.key));
+      html.write(part.value.$2);
+      at = part.key + part.value.$1;
+    }
+    html.write(root.substring(at));
+    return html.toString();
+  }
+
+  /// Encrypt the browser history of the page this request renders, or
+  /// not with `false`. It wins over `InertiaConfig.encryptHistory`.
+  /// The browser only encrypts on HTTPS (and on localhost).
+  /// ```
+  /// Inertia.encryptHistory(req);
+  /// return inertia(req, 'Account/Show', props);
+  /// ```
+  static void encryptHistory(DoxRequest req, [bool encrypt = true]) {
+    _encrypt[req] = encrypt;
+  }
+
+  /// The session key of [clearHistory].
+  static const String clearHistoryKey = '_inertia_clear_history';
+
+  /// Tell the browser to throw away its encrypted history, eg. on
+  /// logout. The next Inertia page carries `clearHistory: true`, once.
+  ///
+  /// With a session, it is kept until the next page renders, so it
+  /// works before a redirect. With no session, it only works when this
+  /// same request renders a page.
+  /// ```
+  /// Inertia.clearHistory(req);
+  /// return redirect('/login');
+  /// ```
+  static void clearHistory(DoxRequest req) {
+    if (req.hasSession) {
+      req.session.put(clearHistoryKey, true);
+    } else {
+      _clear[req] = true;
+    }
+  }
+
+  /// true when [clearHistory] was called for this page. It is read once.
+  static bool _takeClearHistory(DoxRequest req) {
+    bool stored = req.hasSession && req.session.pull(clearHistoryKey) == true;
+    return stored || _clear[req] == true;
   }
 
   /// The session key of the data from [flash].

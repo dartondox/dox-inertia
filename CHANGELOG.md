@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Server side rendering (SSR): set `ssr: InertiaSsr()` in `InertiaConfig`. On a first visit, Dox sends the page to the Inertia SSR server (default `http://127.0.0.1:13714/render`). The HTML of the answer goes in place of `@inertia`, and its head tags go right before the first `</head>`. When the SSR server is down, too slow (`timeout`, default 2 seconds, then the request is stopped) or gives a bad answer, the normal page is sent, with one warning. A `url` that is not a full `http` or `https` url gives an error when the app starts. SSR is off by default. You run the Node process yourself.
+- History encryption: `encryptHistory: true` in `InertiaConfig` turns it on for all pages. `Inertia.encryptHistory(req)` and `Inertia.encryptHistory(req, false)` set it for one page. `EncryptHistoryMiddleware` turns it on for a router.
+- `Inertia.clearHistory(req)`: the next Inertia page carries `clearHistory: true`, once. It is kept in the session, so it works before a redirect. With no session, it only works when the same request renders a page.
+- New dependency: `http`, for the request to the SSR server.
 - Fix: an empty `200` in an Inertia request is sent back to the page it came from. The redirect lost the headers and cookies that the controller set on the empty answer. They are now kept.
 - Faster: a prop map with no async values no longer makes an extra list.
 
