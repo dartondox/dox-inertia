@@ -1035,6 +1035,36 @@ void main() {
       }
     });
 
+    test('each mark is filled by its place in the root view', () async {
+      File view = File('${dir.path}/app.html');
+      String old = await view.readAsString();
+      try {
+        configure(ssr: FakeSsr(ok).ssr);
+        String tags = await Vite(Inertia.config).tags();
+        const String head = '<title>Users</title>\n<meta name="a">\n';
+        // @inertia before </head>
+        await view.writeAsString('<head>@inertia @vite</head>');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$rendered $tags$head</head>',
+        );
+        // no @vite
+        await view.writeAsString('<head></head><body>@inertia</body>');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$head</head><body>$rendered</body>',
+        );
+        // two @inertia: the second stays as text
+        await view.writeAsString('<head>@vite</head>@inertia @inertia');
+        expect(
+          (await client.get('/no-session')).body,
+          '<head>$tags$head</head>$rendered @inertia',
+        );
+      } finally {
+        await view.writeAsString(old);
+      }
+    });
+
     test('the request is aborted at the timeout', () async {
       CountingClient hung = CountingClient(hang: true);
       StringBuffer log = StringBuffer();

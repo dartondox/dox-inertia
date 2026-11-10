@@ -545,7 +545,7 @@ ssr: Env.get<String>('APP_ENV') == 'production' ? InertiaSsr() : null,
 
 ### The root view with SSR
 
-The root view needs no change. It must have `@inertia` and a `</head>` tag.
+The root view needs no change. It must have `@inertia`. Head tags also need a `</head>` tag.
 
 - The HTML from the SSR server goes in place of `@inertia`. It holds the page data and the rendered `<div id="app">`.
 - The head tags of the page (from the `<Head>` component, like `<title>`) go right before the first `</head>`. `</HEAD>` works too. A root view with no `</head>` gets no head tags.
