@@ -23,6 +23,7 @@ class InertiaConfig {
 
   /// The HTML page of the first visit. Dox puts the page data in place of
   /// `@inertia`, and the script and style tags in place of `@vite`.
+  /// One request can use another file with `Inertia.setRootView`.
   final String rootView;
 
   /// The Vite entry files, as in the `input` of `vite.config.js`.

@@ -15,6 +15,9 @@ const Map<String, String> inertiaHeaders = <String, String>{
 
 int calls = 0;
 
+/// the folder of the root views of the tests
+late String views;
+
 /// a prop value with no toJson()
 class NoJson {}
 
@@ -115,6 +118,49 @@ class InertiaRouter extends Router {
       Inertia.clearHistory(req);
       return inertia(req, 'Plain');
     });
+    Route.get('/admin', (DoxRequest req) {
+      Inertia.setRootView(req, '$views/admin.html');
+      return inertia(req, 'Admin', <String, dynamic>{
+        // slow, so another request runs while this one waits
+        'wait': () =>
+            Future<int>.delayed(const Duration(milliseconds: 50), () => 1),
+      });
+    });
+    Route.get('/missing-root', (DoxRequest req) {
+      Inertia.setRootView(req, '$views/none.html');
+      return inertia(req, 'Plain');
+    });
+    Route.get('/view', (DoxRequest req) {
+      Inertia.setRootView(req, '$views/view.html');
+      Inertia.withViewData(req, <String, Object?>{
+        'title': 'A & <B> "c" \'d\'',
+        'old': 'first',
+      });
+      Inertia.withViewData(req, <String, Object?>{
+        'old': 'second',
+        'mark': '@inertia @vite {{ title }}',
+        'none': null,
+        'count': 3,
+      });
+      return inertia(req, 'View', <String, dynamic>{
+        'evil': '{{ csrfToken }} {{ title }} @inertia',
+      });
+    });
+  }
+}
+
+class AdminRouter extends Router {
+  @override
+  String get prefix => 'a';
+
+  @override
+  List<dynamic> get middleware => <dynamic>[
+    RootViewMiddleware('$views/admin.html'),
+  ];
+
+  @override
+  void register() {
+    Route.get('/page', (DoxRequest req) => inertia(req, 'Plain'));
   }
 }
 
@@ -216,6 +262,15 @@ class SessionRouter extends Router {
     });
     Route.post('/form', save);
     Route.put('/form', save);
+    Route.get('/view', (DoxRequest req) {
+      Inertia.setRootView(req, '$views/view.html');
+      return inertia(req, 'View', <String, dynamic>{'evil': '{{ csrfToken }}'});
+    });
+    Route.get('/view-own', (DoxRequest req) {
+      Inertia.setRootView(req, '$views/view.html');
+      Inertia.withViewData(req, <String, Object?>{'csrfToken': 'mine'});
+      return inertia(req, 'View');
+    });
   }
 }
 
@@ -256,10 +311,23 @@ void main() {
     dir = await Directory.systemTemp.createTemp('dox_inertia_');
     await File('${dir.path}/app.html')
         .writeAsString('<html><head>@vite</head><body>@inertia</body></html>');
+    views = dir.path;
+    await File('${dir.path}/admin.html')
+        .writeAsString('<html><body class="admin">@inertia</body></html>');
+    await File('${dir.path}/view.html').writeAsString(
+      '<head><title>{{ title }}</title><meta content="{{csrfToken}}">@vite'
+      '</head><body>{{ old }}|{{mark}}|{{ none }}|{{count}}|{{ unknown }}|'
+      '{{ a.b }}|{{ }}@inertia</body>',
+    );
     client = await DoxTestClient.start(
       AppConfig(
         appKey: '4HyiSrq4N5Nfg6bOadIhbFEI8zbUkpxt',
-        routers: <Router>[InertiaRouter(), SessionRouter(), EncryptedRouter()],
+        routers: <Router>[
+          InertiaRouter(),
+          SessionRouter(),
+          EncryptedRouter(),
+          AdminRouter(),
+        ],
       ),
     );
   });
@@ -1145,6 +1213,125 @@ void main() {
   });
 
   // ponytail: last, because a global share stays for the whole isolate
+  group('root view', () {
+    const String adminStart = '<html><body class="admin"><script';
+
+    test('setRootView is for one request only', () async {
+      // /admin is slow: /no-session runs while it waits
+      List<TestResponse> both = await Future.wait(<Future<TestResponse>>[
+        client.get('/admin'),
+        client.get('/no-session'),
+      ]);
+      expect(both[0].body, startsWith(adminStart));
+      expect(both[1].body, startsWith('<html><head>'));
+      // each file is cached under its own path
+      expect((await client.get('/admin')).body, startsWith(adminStart));
+      expect(
+        (await client.get('/no-session')).body,
+        startsWith('<html><head>'),
+      );
+    });
+
+    test('RootViewMiddleware sets it for a router', () async {
+      TestResponse res = await client.get('/a/page');
+      expect(res.body, startsWith(adminStart));
+      expect(res.body, contains('"component":"Plain"'));
+    });
+
+    test('an Inertia request is not changed', () async {
+      TestResponse res = await client.get('/a/page', headers: inertiaHeaders);
+      expect(res.json['component'], 'Plain');
+    });
+
+    test('a missing file fails like a missing default root view', () async {
+      TestResponse set = await client.get('/missing-root');
+      Inertia.configure(
+        InertiaConfig(rootView: '${dir.path}/none.html', version: '1'),
+      );
+      TestResponse byDefault = await client.get('/no-session');
+      expect(set.status, 500);
+      expect(byDefault.status, 500);
+      expect(set.body, byDefault.body);
+    });
+  });
+
+  group('view data', () {
+    const String json =
+        '{"component":"View","url":"/view","version":"1",'
+        '"clearHistory":false,"encryptHistory":false,'
+        '"props":{"app":"Dox","title":"shared",'
+        '"evil":"{{ csrfToken }} {{ title }} @inertia"},'
+        '"sharedProps":["app","title"]}';
+    const String title =
+        '<title>A &amp; &lt;B&gt; &quot;c&quot; &#39;d&#39;</title>';
+    // with and with no spaces, merged, null, a number, and the text
+    // that is not a known key stays
+    const String filled =
+        'second|@inertia @vite {{ title }}||3|{{ unknown }}|{{ a.b }}|{{ }}';
+
+    test('fills {{ key }} escaped, by its place in the root view', () async {
+      TestResponse res = await client.get('/view');
+      // no session: {{csrfToken}} stays. The text of a value and of a
+      // prop is not read as a mark.
+      expect(
+        res.body,
+        '<head>$title<meta content="{{csrfToken}}">'
+        '${await Vite(Inertia.config).tags()}</head><body>$filled'
+        '<script data-page="app" type="application/json">$json</script>'
+        '<div id="app"></div></body>',
+      );
+    });
+
+    test('is not in the answer of an Inertia request', () async {
+      TestResponse res = await client.get('/view', headers: inertiaHeaders);
+      expect(res.body, json);
+    });
+
+    test('works with SSR: its head and body are not read as marks', () async {
+      Future<http.Response> tricky(http.Request request) async {
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'head': <String>['<meta name="{{ title }} {{csrfToken}}">'],
+            'body': '<div id="app">{{ title }} {{ old }}</div>',
+          }),
+          200,
+        );
+      }
+
+      FakeSsr fake = FakeSsr(tricky);
+      configure(ssr: fake.ssr);
+      expect(
+        (await client.get('/view')).body,
+        '<head>$title<meta content="{{csrfToken}}">'
+        '${await Vite(Inertia.config).tags()}'
+        '<meta name="{{ title }} {{csrfToken}}">\n</head><body>$filled'
+        '<div id="app">{{ title }} {{ old }}</div></body>',
+      );
+      // the SSR server gets the page only, with no view data
+      expect(fake.body, json);
+    });
+
+    test('{{ csrfToken }} is the token of the session', () async {
+      Browser browser = Browser(client);
+      TestResponse res = await browser.send('GET', '/s/view');
+      String token = browser.cookies['XSRF-TOKEN']!;
+      expect(token, isNotEmpty);
+      expect(res.body, contains('<meta content="$token">'));
+      // a prop with {{ csrfToken }} does not get the token
+      expect(token.allMatches(res.body).length, 1);
+      expect(res.body, contains('"evil":"{{ csrfToken }}"'));
+      // no view data: the other keys stay as they are
+      expect(res.body, contains('<title>{{ title }}</title>'));
+    });
+
+    test('a csrfToken of the app wins', () async {
+      Browser browser = Browser(client);
+      TestResponse res = await browser.send('GET', '/s/view-own');
+      expect(res.body, contains('<meta content="mine">'));
+      expect(res.body, isNot(contains(browser.cookies['XSRF-TOKEN']!)));
+    });
+  });
+
   group('global share', () {
     test('goes to every page, the request share wins', () async {
       Inertia.shareGlobal('version', 'v1');
