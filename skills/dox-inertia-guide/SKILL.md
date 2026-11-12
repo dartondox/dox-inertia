@@ -38,8 +38,8 @@ import 'package:dox_inertia/dox_inertia.dart';
 
 InertiaConfig inertiaConfig = InertiaConfig(
   entryPoints: <String>['resources/js/app.jsx'],
-  // null in production
-  devServerUrl: Env.get<String>('APP_ENV') == 'local'
+  // dev: the Vite dev server. Else null, so Dox reads the build manifest.
+  devServerUrl: <String>['development', 'local'].contains(Env.get<String>('APP_ENV'))
       ? 'http://localhost:5173'
       : null,
   reactRefresh: true,
@@ -69,7 +69,7 @@ globalMiddleware: <dynamic>[
 
 `CsrfMiddleware` sets the `XSRF-TOKEN` cookie. The Inertia client sends it back. You write no code for it.
 
-6. Vite: `vite.config.js` needs `publicDir: false`, `base: command === 'build' ? '/build/' : '/'`, and `build: { manifest: true, outDir: 'public/build', rollupOptions: { input: 'resources/js/app.jsx' } }`. In production Dox reads `public/build/.vite/manifest.json`. Serve `public/build` as `/build/` (a route, or nginx/Caddy).
+6. Vite: `vite.config.js` needs `publicDir: false`, `base: command === 'build' ? '/build/' : '/'`, and `build: { manifest: true, outDir: 'public/build', rollupOptions: { input: 'resources/js/app.jsx' } }`. This config writes no `public/hot` file, so in dev Dox finds the dev server only through `devServerUrl` (step 3). A new Dox app has `APP_ENV=development`. With no dev server url, Dox reads `public/build/.vite/manifest.json`, and pages fail until you run `vite build`. Serve `public/build` as `/build/` (a route, or nginx/Caddy).
 
 ### InertiaConfig options
 

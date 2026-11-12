@@ -351,12 +351,12 @@ Dox is in dev mode when:
 
 In production (no dev server), Dox reads `public/build/.vite/manifest.json`. `@vite` gives a `<link>` tag for the css of each entry and of the chunks it imports, and a `<script type="module">` tag for each entry.
 
-Set `devServerUrl` from the env, so production does not use it:
+Set `devServerUrl` from the env, so production does not use it. A new Dox app has `APP_ENV=development`. The `vite.config.js` above writes no `public/hot` file, so in dev Dox needs `devServerUrl`:
 
 ```dart title="lib/config/inertia.dart"
 InertiaConfig inertiaConfig = InertiaConfig(
   entryPoints: <String>['resources/js/app.jsx'],
-  devServerUrl: Env.get<String>('APP_ENV') == 'local'
+  devServerUrl: <String>['development', 'local'].contains(Env.get<String>('APP_ENV'))
       ? 'http://localhost:5173'
       : null,
   reactRefresh: true,
