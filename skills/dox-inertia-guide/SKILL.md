@@ -33,6 +33,7 @@ Use the Inertia 3 client (`@inertiajs/react`, `@inertiajs/vue3` or `@inertiajs/s
 3. Config `lib/config/inertia.dart`:
 
 ```dart
+import 'package:dox_core/dox_core.dart';
 import 'package:dox_inertia/dox_inertia.dart';
 
 InertiaConfig inertiaConfig = InertiaConfig(
@@ -44,8 +45,6 @@ InertiaConfig inertiaConfig = InertiaConfig(
   reactRefresh: true,
 );
 ```
-
-(`Env` is from `package:dox_core/dox_core.dart`.)
 
 4. Provider `lib/providers/inertia_provider.dart`. Dox finds every `DoxProvider`. Run `dart run build_runner build` to update `lib/generated/container.g.dart`.
 
