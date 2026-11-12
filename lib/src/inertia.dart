@@ -351,8 +351,8 @@ class Inertia {
     _shared[req] = <String, dynamic>{...?_shared[req], ...props};
   }
 
-  /// Share the prop [key] with every page of the app. Call it once at boot, eg. in the
-  /// `setup()` of your `InertiaProvider`, so it runs in every isolate.
+  /// Share the prop [key] with every page of the app. Call it once at boot, eg.
+  /// in the `setup()` of your `InertiaProvider`, so it runs in every isolate.
   ///
   /// Only for app wide values: a constant, or a function that does not
   /// read a request. The value is kept for all users and all requests.
