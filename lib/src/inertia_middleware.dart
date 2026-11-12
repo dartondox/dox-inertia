@@ -12,7 +12,7 @@ import 'inertia.dart';
 ///   README.
 /// - It shares the props of [share] with every page.
 /// - An Inertia request that gets an empty `200` answer is sent back to
-///   the page it came from (`back(req)`), like Laravel does. Only a
+///   the page it came from (`back(req)`). Only a
 ///   `Referer` of the same site is used, else it goes to `/`.
 /// - After a PUT, PATCH or DELETE Inertia request, it turns a `302`
 ///   redirect into `303`. Then the browser follows it with GET.

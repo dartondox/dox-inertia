@@ -351,9 +351,8 @@ class Inertia {
     _shared[req] = <String, dynamic>{...?_shared[req], ...props};
   }
 
-  /// Share the prop [key] with every page of the app, like
-  /// `Inertia::share` of Laravel. Call it once at boot, eg. in the
-  /// `setup()` of your `InertiaProvider`, so it runs in every isolate.
+  /// Share the prop [key] with every page of the app. Call it once at boot, eg.
+  /// in the `setup()` of your `InertiaProvider`, so it runs in every isolate.
   ///
   /// Only for app wide values: a constant, or a function that does not
   /// read a request. The value is kept for all users and all requests.
@@ -375,8 +374,7 @@ class Inertia {
     return <String, dynamic>{..._global, ...?props};
   }
 
-  /// The same as `inertia(req, component, props)`, like `Inertia::render`
-  /// of Laravel.
+  /// The same as `inertia(req, component, props)`.
   static Future<DoxResponse> render(
     DoxRequest req,
     String component, [
@@ -390,7 +388,7 @@ class Inertia {
     return OptionalProp(callback);
   }
 
-  /// The same as [optional], like `Inertia::lazy` of Laravel.
+  /// The same as [optional].
   static OptionalProp lazy(Object? Function() callback) {
     return OptionalProp(callback);
   }
