@@ -69,7 +69,30 @@ globalMiddleware: <dynamic>[
 
 `CsrfMiddleware` sets the `XSRF-TOKEN` cookie. The Inertia client sends it back. You write no code for it.
 
-6. Vite: `vite.config.js` needs `publicDir: false`, `base: command === 'build' ? '/build/' : '/'`, and `build: { manifest: true, outDir: 'public/build', rollupOptions: { input: 'resources/js/app.jsx' } }`. This config writes no `public/hot` file, so in dev Dox finds the dev server only through `devServerUrl` (step 3). A new Dox app has `APP_ENV=development`. With no dev server url, Dox reads `public/build/.vite/manifest.json`, and pages fail until you run `vite build`. Serve `public/build` as `/build/` (a route, or nginx/Caddy).
+6. Vite. Install the packages: `npm install @inertiajs/react react react-dom` and `npm install -D vite @vitejs/plugin-react`. Then write `vite.config.js`:
+
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig(({ command }) => ({
+  plugins: [react()],
+  // public/ holds the Dox public files. The build goes into public/build,
+  // so do not let Vite copy public/ into the build.
+  publicDir: false,
+  // the built files are served from /build/
+  base: command === 'build' ? '/build/' : '/',
+  // in dev, assets load from the Vite port, not the Dox port
+  server: { origin: 'http://localhost:5173' },
+  build: {
+    manifest: true,
+    outDir: 'public/build',
+    rollupOptions: { input: 'resources/js/app.jsx' },
+  },
+}))
+```
+
+`reactRefresh: true` (step 3) loads `/@react-refresh`, which only exists with `@vitejs/plugin-react`. Without `server.origin`, dev assets load from the wrong port. This config writes no `public/hot` file, so in dev Dox finds the dev server only through `devServerUrl` (step 3). A new Dox app has `APP_ENV=development`. With no dev server url, Dox reads `public/build/.vite/manifest.json`, and pages fail until you run `vite build`. Serve `public/build` as `/build/` (a route, or nginx/Caddy).
 
 ### InertiaConfig options
 
