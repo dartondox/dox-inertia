@@ -11,6 +11,8 @@ Use the Inertia 3 client (`@inertiajs/react`, `@inertiajs/vue3` or `@inertiajs/s
 
 ## Install and set up
 
+Fast way: `dox add inertia`. It adds the package, the config, the provider and the root view (steps 1 to 4 below). It never overwrites a file. Vite, the client and the middleware are still yours to set up.
+
 1. Add the package: `dart pub add dox_inertia`.
 
 2. Root view `resources/views/app.html`. It is plain HTML, not a `.dox.html` template. `@vite` becomes the script and style tags. `@inertia` becomes the page data and `<div id="app">`.
