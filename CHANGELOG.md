@@ -2,7 +2,6 @@
 
 - Docs: the README Vite config set `devServerUrl` only when `APP_ENV` is `local`. A new Dox app has `APP_ENV=development`, so the dev server was not used. It now checks `development` and `local`.
 - Ships an AI agent skill (dox-inertia-guide). Install it in your app with `dart run skills@ get`.
-- Requires Dart 3.14 or newer.
 - `Inertia.withViewData(req, data)`: values for the root view. `{{ key }}` in the root view becomes the value, HTML escaped. Use it for the `<title>` or meta tags of the first page load. The values are not page props and are never sent as JSON. `{{ key }}` with a key that is not set stays as it is, so a root view with no view data gives the same HTML as before.
 - `{{ csrfToken }}` in the root view is filled with the CSRF token of the session, when the request has a session. So `<meta name="csrf-token" content="{{ csrfToken }}">` works with no code.
 - `Inertia.setRootView(req, path)` uses another root view file for one request, eg. for an admin area. `RootViewMiddleware(path)` does it for a router.
