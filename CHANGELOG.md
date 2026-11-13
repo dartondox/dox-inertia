@@ -1,4 +1,4 @@
-## Unreleased
+## 3.2.0
 
 - New: `dox add inertia` (the `inertia:install` command). It adds the config, the provider and the root view `resources/views/app.html`. It never overwrites a file. New dependency: `dox_annotation`.
 - Docs: the README Vite config set `devServerUrl` only when `APP_ENV` is `local`. A new Dox app has `APP_ENV=development`, so the dev server was not used. It now checks `development` and `local`.
