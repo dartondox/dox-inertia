@@ -34,6 +34,19 @@ class InertiaInstallCommand extends Command {
     Installer installer = Installer(root: root, runner: runner);
     String app = installer.appName;
 
+    /// first, so an app without the AppEnv class gets the hint and
+    /// nothing else is changed
+    for (String getter in envGetters) {
+      installer.addEnvGetter(getter);
+    }
+    if (!installer.ok) {
+      installer.printSummary(<String>[
+        'lib/config/env.dart has no `abstract class AppEnv`. Run '
+            '`dox env:generate` to make it, then run this again.',
+      ]);
+      return;
+    }
+
     await installer.addDependency('dox_inertia');
     await installer.addDependency('dox_builder', dev: true);
     await installer.addDependency('build_runner', dev: true);
@@ -54,6 +67,13 @@ class InertiaInstallCommand extends Command {
     ]);
   }
 
+  /// the getters of `AppEnv` that `lib/config/inertia.dart` reads
+  static const List<String> envGetters = <String>[
+    '/// development, staging or production. Not set: production.\n'
+        "  String get appEnv => 'production';",
+    "bool get isDevelopment => appEnv == 'development';",
+  ];
+
   /// `lib/config/inertia.dart`, the same as the docs show. The Vite dev
   /// server is used only in development.
   static String config(String app) {
@@ -66,7 +86,9 @@ InertiaConfig inertiaConfig = InertiaConfig(
   entryPoints: <String>['resources/js/app.jsx'],
 
   /// load the scripts from the Vite dev server. null in production.
-  devServerUrl: env.isDevelopment ? 'http://localhost:5173' : null,
+  devServerUrl: (env.isDevelopment || env.appEnv == 'local')
+      ? 'http://localhost:5173'
+      : null,
 
   /// add the React Fast Refresh code in dev mode
   reactRefresh: true,

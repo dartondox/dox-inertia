@@ -24,6 +24,9 @@ void main() {
     File(
       '${root.path}/pubspec.yaml',
     ).writeAsStringSync('name: my_app\n\ndependencies:\n  dox_core: ^3.1.0\n');
+    File('${root.path}/lib/config/env.dart')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('abstract class AppEnv {\n}\n');
     runner = FakeRunner();
     exitCode = 0;
   });
@@ -65,7 +68,29 @@ void main() {
       contains("import 'package:my_app/config/inertia.dart';"),
     );
     expect(read('resources/views/app.html'), contains('@inertia'));
+    expect(read('lib/config/env.dart'), contains('bool get isDevelopment'));
+    expect(read('lib/config/env.dart'), contains('String get appEnv'));
   });
+
+  test(
+    'without AppEnv it gives a hint, exit code 1, and changes nothing',
+    () async {
+      for (String? env in <String?>[null, 'class Other {\n}\n']) {
+        File file = File('${root.path}/lib/config/env.dart');
+        if (env == null) {
+          file.deleteSync();
+        } else {
+          file.writeAsStringSync(env);
+        }
+        Map<String, String> before = snapshot();
+        await install(<String>[]);
+        expect(exitCode, 1);
+        expect(runner.calls, isEmpty);
+        expect(snapshot(), before);
+        exitCode = 0;
+      }
+    },
+  );
 
   test('a second run changes nothing', () async {
     await install(<String>[]);
