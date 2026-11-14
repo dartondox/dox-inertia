@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,13 @@ import 'package:dox_inertia/dox_inertia.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
+
+/// A new key for each run. A fixed key in a public repo is a public key,
+/// and dox_core refuses public sample keys outside development and tests.
+final String _testKey = List<String>.generate(
+  32,
+  (int i) => Random.secure().nextInt(36).toRadixString(36),
+).join();
 
 const Map<String, String> inertiaHeaders = <String, String>{
   'X-Inertia': 'true',
@@ -321,7 +329,7 @@ void main() {
     );
     client = await DoxTestClient.start(
       AppConfig(
-        appKey: '4HyiSrq4N5Nfg6bOadIhbFEI8zbUkpxt',
+        appKey: _testKey,
         routers: <Router>[
           InertiaRouter(),
           SessionRouter(),
