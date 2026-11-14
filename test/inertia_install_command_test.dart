@@ -68,8 +68,33 @@ void main() {
       contains("import 'package:my_app/config/inertia.dart';"),
     );
     expect(read('resources/views/app.html'), contains('@inertia'));
-    expect(read('lib/config/env.dart'), contains('bool get isDevelopment'));
     expect(read('lib/config/env.dart'), contains('String get appEnv'));
+  });
+
+  test('dev mode reads APP_ENV, not an isDevelopment getter', () async {
+    await install(<String>[]);
+    String config = read('lib/config/inertia.dart');
+    // config/app.dart reaches config/inertia.dart through the generated
+    // container, so inertia.dart does not read appConfig
+    expect(
+      config,
+      contains("(env.appEnv == 'development' || env.appEnv == 'local')"),
+    );
+    expect(config, isNot(contains('isDevelopment')));
+    expect(config, isNot(contains('package:my_app/config/app.dart')));
+    expect(read('lib/config/env.dart'), isNot(contains('isDevelopment')));
+  });
+
+  test('an AppEnv with the old isDevelopment getter is kept', () async {
+    String mine =
+        'abstract class AppEnv {\n'
+        "  String get appEnv => 'production';\n\n"
+        "  bool get isDevelopment => appEnv == 'development';\n"
+        '}\n';
+    File('${root.path}/lib/config/env.dart').writeAsStringSync(mine);
+    await install(<String>[]);
+    expect(exitCode, 0);
+    expect(read('lib/config/env.dart'), mine);
   });
 
   test(
