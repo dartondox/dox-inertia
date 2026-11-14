@@ -78,6 +78,7 @@ class InertiaInstallCommand extends Command {
   static String config(String app) {
     return '''
 import 'package:dox_inertia/dox_inertia.dart';
+import 'package:$app/config/app.dart';
 import 'package:$app/config/env.dart';
 
 InertiaConfig inertiaConfig = InertiaConfig(
@@ -85,9 +86,7 @@ InertiaConfig inertiaConfig = InertiaConfig(
   entryPoints: <String>['resources/js/app.jsx'],
 
   /// load the scripts from the Vite dev server. null in production.
-  /// Not `appConfig`: config/app.dart imports this file through the
-  /// generated container, so reading it here makes an import cycle.
-  devServerUrl: (env.appEnv == 'development' || env.appEnv == 'local')
+  devServerUrl: (appConfig.isDevelopment || env.appEnv == 'local')
       ? 'http://localhost:5173'
       : null,
 
