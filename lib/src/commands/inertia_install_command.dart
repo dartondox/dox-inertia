@@ -71,7 +71,6 @@ class InertiaInstallCommand extends Command {
   static const List<String> envGetters = <String>[
     '/// development, staging or production. Not set: production.\n'
         "  String get appEnv => 'production';",
-    "bool get isDevelopment => appEnv == 'development';",
   ];
 
   /// `lib/config/inertia.dart`, the same as the docs show. The Vite dev
@@ -79,6 +78,7 @@ class InertiaInstallCommand extends Command {
   static String config(String app) {
     return '''
 import 'package:dox_inertia/dox_inertia.dart';
+import 'package:$app/config/app.dart';
 import 'package:$app/config/env.dart';
 
 InertiaConfig inertiaConfig = InertiaConfig(
@@ -86,7 +86,7 @@ InertiaConfig inertiaConfig = InertiaConfig(
   entryPoints: <String>['resources/js/app.jsx'],
 
   /// load the scripts from the Vite dev server. null in production.
-  devServerUrl: (env.isDevelopment || env.appEnv == 'local')
+  devServerUrl: (appConfig.isDevelopment || env.appEnv == 'local')
       ? 'http://localhost:5173'
       : null,
 

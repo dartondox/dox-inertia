@@ -1,3 +1,7 @@
+## Unreleased
+
+- Fix: `dox inertia:install` added `bool get isDevelopment => appEnv == 'development';` to `AppEnv` in `lib/config/env.dart`. The env class should hold only env keys, and the generated env reads each getter as a key (here `IS_DEVELOPMENT`). It no longer adds it. `lib/config/inertia.dart` now checks `appConfig.isDevelopment || env.appEnv == 'local'` and imports `config/app.dart`. An app that already has the getter keeps it and still works. Needs the next dox_core release (`AppConfig.isDevelopment`).
+
 ## 3.2.0
 
 - New: `dox add inertia` (the `inertia:install` command). It adds the config, the provider and the root view `resources/views/app.html`. It never overwrites a file. New dependency: `dox_annotation`.
