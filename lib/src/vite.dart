@@ -154,7 +154,7 @@ class Vite {
     if (_hotWarned) return;
     _hotWarned = true;
     stderr.writeln(
-      'dox_inertia: found the Vite hot file $path, but APP_ENV is '
+      '[inertia] found the Vite hot file $path, but APP_ENV is '
       'production. It is ignored and the built files are used. '
       'Remove the hot file from the deploy.',
     );
