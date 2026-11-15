@@ -108,7 +108,7 @@ class InertiaSsr {
     if (!_failed) {
       _failed = true;
       (_log ?? stderr).writeln(
-        'dox_inertia: SSR failed at $url ($reason). Pages are sent '
+        '[inertia] SSR failed at $url ($reason). Pages are sent '
         'without SSR until the SSR server works again.',
       );
     }

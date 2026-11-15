@@ -1178,7 +1178,7 @@ void main() {
           return ok(request);
         }),
       );
-      int warnings() => 'dox_inertia: SSR failed'.allMatches('$log').length;
+      int warnings() => '[inertia] SSR failed'.allMatches('$log').length;
 
       expect(await ssr.render('{}'), isNull);
       expect(await ssr.render('{}'), isNull);
