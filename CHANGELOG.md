@@ -1,4 +1,4 @@
-## Unreleased
+## 3.2.2
 
 - Change: every log and warning line now starts with `[inertia]` (was `dox_inertia:`). Only the prefix changed.
 
