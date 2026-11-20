@@ -264,6 +264,41 @@ void main() {
       expect(exitCode, 0);
     });
 
+    test('app.tsx gives ssr.tsx with the tsx glob and script', () async {
+      File('${root.path}/resources/js/app.tsx')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('');
+      File('${root.path}/package.json').writeAsStringSync(
+        '{"dependencies":{"@inertiajs/react":"^3.1.0"},"scripts":{}}',
+      );
+      await install(<String>['--ssr']);
+      expect(exitCode, 0);
+      expect(File('${root.path}/resources/js/ssr.jsx').existsSync(), isFalse);
+      String entry = read('resources/js/ssr.tsx');
+      expect(entry, contains("'./Pages/**/*.tsx'"));
+      expect(entry, contains('.tsx`]'));
+      expect(entry, isNot(contains('.jsx')));
+      Map<String, dynamic> json =
+          jsonDecode(read('package.json')) as Map<String, dynamic>;
+      expect(
+        (json['scripts'] as Map<String, dynamic>)['build:ssr'],
+        contains('resources/js/ssr.tsx'),
+      );
+    });
+
+    test('Vue or Svelte: no SSR file, message, exit 0', () async {
+      for (String pkg in <String>['vue3', 'svelte']) {
+        File('${root.path}/package.json')
+            .writeAsStringSync('{"dependencies":{"@inertiajs/$pkg":"^3.1.0"}}');
+        await install(<String>['--ssr']);
+        expect(exitCode, 0);
+        expect(Directory('${root.path}/resources/js').existsSync(), isFalse);
+        expect(read('package.json'), isNot(contains('build:ssr')));
+      }
+      // the server side is still set up
+      expect(read('lib/config/inertia.dart'), isNotEmpty);
+    });
+
     test('without --ssr nothing SSR is written', () async {
       await install(<String>[]);
       expect(File('${root.path}/resources/js/ssr.jsx').existsSync(), isFalse);

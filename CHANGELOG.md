@@ -1,6 +1,7 @@
 ## Unreleased
 
 - New: `dox inertia:install --ssr` writes `resources/js/ssr.jsx` and adds the `build:ssr` script to `package.json`. It never overwrites a file, and it leaves a missing or broken `package.json` alone (it prints a hint instead). Without `--ssr` nothing changes.
+- Change: `inertia:install --ssr` now follows the app. With `resources/js/app.tsx` it writes `ssr.tsx` (glob `./Pages/**/*.tsx`) and the `build:ssr` script uses it. When `package.json` lists `@inertiajs/vue3` or `@inertiajs/svelte` and not `@inertiajs/react`, it writes no SSR file and prints that SSR scaffolding supports React only (exit code 0). The SSR entry uses the `host` option, which needs `@inertiajs/react` 3.1.0 or newer.
 - New: `dox inertia:start-ssr` starts the SSR server from `bootstrap/ssr/ssr.js` (or `ssr.mjs`) with Bun, in the foreground. `--node` uses Node. It prints a clear message and exits with code 1 when the file is not built or the runtime is not installed.
 
 ## 3.2.2
