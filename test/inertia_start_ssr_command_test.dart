@@ -6,11 +6,22 @@ import 'package:test/test.dart';
 
 /// a process that has already ended with [code]
 class FakeProcess implements Process {
-  FakeProcess(this.code);
+  /// ends with [code] at once, or when [end] is called
+  FakeProcess(this.code, {bool wait = false}) {
+    if (!wait) done.complete(code);
+  }
   final int code;
+  final Completer<int> done = Completer<int>();
+  final List<ProcessSignal> killed = <ProcessSignal>[];
 
   @override
-  Future<int> get exitCode async => code;
+  Future<int> get exitCode => done.future;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed.add(signal);
+    return true;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
@@ -43,6 +54,7 @@ void main() {
         if (missing) throw ProcessException(exe, a, 'not found');
         return FakeProcess(code);
       },
+      signals: (ProcessSignal s) => const Stream<ProcessSignal>.empty(),
     ).run(args);
   }
 
@@ -62,11 +74,38 @@ void main() {
     expect(exitCode, 0);
   });
 
-  test('prefers ssr.js over ssr.mjs', () async {
+  test('with both files, the newer one wins', () async {
     make('ssr.js');
     make('ssr.mjs');
+    File('${root.path}/bootstrap/ssr/ssr.js')
+        .setLastModifiedSync(DateTime.now().subtract(const Duration(hours: 1)));
     await start(<String>[]);
-    expect(started.single.last, 'bootstrap/ssr/ssr.js');
+    expect(started.single.last, 'bootstrap/ssr/ssr.mjs');
+  });
+
+  test('sends SIGINT and SIGTERM to the child, then stops listening', () async {
+    make('ssr.js');
+    StreamController<ProcessSignal> int = StreamController<ProcessSignal>();
+    StreamController<ProcessSignal> term = StreamController<ProcessSignal>();
+    FakeProcess child = FakeProcess(0, wait: true);
+    Future<void> run = InertiaStartSsrCommand(
+      root: root,
+      start: (String exe, List<String> a) async => child,
+      signals: (ProcessSignal s) =>
+          s == ProcessSignal.sigint ? int.stream : term.stream,
+    ).run(<String>[]);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    int.add(ProcessSignal.sigint);
+    if (!Platform.isWindows) term.add(ProcessSignal.sigterm);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    child.done.complete(0);
+    await run;
+    expect(child.killed.first, ProcessSignal.sigint);
+    if (!Platform.isWindows) {
+      expect(child.killed.last, ProcessSignal.sigterm);
+      expect(term.hasListener, isFalse);
+    }
+    expect(int.hasListener, isFalse);
   });
 
   test('--node runs node', () async {

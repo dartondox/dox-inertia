@@ -154,15 +154,59 @@ void main() {
           jsonDecode(read('package.json')) as Map<String, dynamic>;
       expect(json.keys.toList(), <String>['name', 'scripts', 'type']);
       Map<String, dynamic> scripts = json['scripts'] as Map<String, dynamic>;
-      expect(scripts.keys.toList(), <String>['dev', 'build:ssr']);
+      expect(scripts.keys.toList(), <String>['build:ssr', 'dev']);
       expect(scripts['build:ssr'], InertiaInstallCommand.buildSsrScript);
-      expect(read('package.json'), contains('\n  "name"'));
+      expect(read('package.json'), startsWith('{"name":"x","scripts":{'));
     });
 
-    test('adds scripts when package.json has none', () async {
-      File('${root.path}/package.json').writeAsStringSync('{"name":"x"}');
+    Future<String> pkg(String text) async {
+      File('${root.path}/package.json').writeAsStringSync(text);
       await install(<String>['--ssr']);
-      expect(read('package.json'), contains('"build:ssr"'));
+      jsonDecode(read('package.json'));
+      return read('package.json');
+    }
+
+    test('keeps 4 space indent, CRLF and the trailing newline', () async {
+      String out = await pkg(
+        '{\r\n    "name": "x",\r\n    "files": ["a", "b"],\r\n'
+        '    "scripts": {\r\n        "dev": "vite"\r\n    }\r\n}\r\n',
+      );
+      expect(out, contains('        "build:ssr": '));
+      expect(out, contains('["a", "b"]'));
+      expect(out, contains('\r\n        "dev": "vite"\r\n    }\r\n}\r\n'));
+      expect(out.contains(RegExp(r'[^\r]\n')), isFalse);
+    });
+
+    test('keeps tab indent', () async {
+      String out = await pkg('{\n\t"scripts": {\n\t\t"dev": "vite"\n\t}\n}\n');
+      expect(out, contains('\n\t\t"build:ssr": '));
+      expect(out, endsWith('\n\t}\n}\n'));
+    });
+
+    test('works with an empty scripts object', () async {
+      String out = await pkg('{\n  "scripts": {}\n}\n');
+      expect(out, contains('"scripts": {"build:ssr": '));
+      expect(out, endsWith('}\n}\n'));
+    });
+
+    test('works with an empty scripts object on many lines', () async {
+      String out = await pkg('{\n  "scripts": {\n  }\n}\n');
+      expect(out, contains('{\n    "build:ssr": '));
+      expect(out, endsWith('\n  }\n}\n'));
+    });
+
+    test('keeps a file with no trailing newline as it is', () async {
+      String out = await pkg('{"scripts":{"dev":"vite"}}');
+      expect(out.endsWith('}}'), isTrue);
+      expect(
+        (jsonDecode(out) as Map<String, dynamic>)['scripts'],
+        contains('build:ssr'),
+      );
+    });
+
+    test('no scripts object: file kept, hint only', () async {
+      String text = '{\n  "name": "x"\n}\n';
+      expect(await pkg(text), text);
     });
 
     test('keeps an existing ssr.jsx and build:ssr', () async {

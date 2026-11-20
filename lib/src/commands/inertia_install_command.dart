@@ -90,8 +90,10 @@ class InertiaInstallCommand extends Command {
       'vite build && vite build --ssr resources/js/ssr.jsx '
       '--outDir bootstrap/ssr';
 
-  /// adds `build:ssr` to the `scripts` of package.json. It keeps the other
-  /// keys and their order. A missing or broken package.json is not touched.
+  /// adds `build:ssr` to the `scripts` of package.json. The line is put in
+  /// as text, so the indent, the line ends and the other keys stay as they
+  /// are. When this cannot be done safely, nothing is changed and a hint is
+  /// printed.
   void addBuildScript(Installer installer) {
     File file = File('${installer.root.path}/package.json');
     if (!file.existsSync()) {
@@ -99,32 +101,65 @@ class InertiaInstallCommand extends Command {
       installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
       return;
     }
+    String text = file.readAsStringSync();
     Object? json;
     try {
-      json = jsonDecode(file.readAsStringSync());
+      json = jsonDecode(text);
     } on FormatException {
       json = null;
     }
     Object? scripts = json is Map<String, dynamic> ? json['scripts'] : null;
-    if (json is! Map<String, dynamic> ||
-        (json.containsKey('scripts') && scripts is! Map<String, dynamic>)) {
-      installer.note('skipped  package.json (not a valid package file)');
-      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
-      return;
-    }
-    Map<String, dynamic> map = scripts is Map<String, dynamic>
-        ? scripts
-        : <String, dynamic>{};
-    if (map.containsKey('build:ssr')) {
+    if (scripts is Map<String, dynamic> && scripts.containsKey('build:ssr')) {
       installer.note('skipped  package.json build:ssr (already there)');
       return;
     }
-    map['build:ssr'] = buildSsrScript;
-    json['scripts'] = map;
-    file.writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert(json)}\n',
-    );
+    String? changed = scripts is Map<String, dynamic>
+        ? _insertScript(text, json as Map<String, dynamic>)
+        : null;
+    if (changed == null) {
+      installer.note('skipped  package.json (could not add build:ssr)');
+      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
+      return;
+    }
+    file.writeAsStringSync(changed);
     installer.note('added    build:ssr to package.json');
+  }
+
+  /// [text] with the `build:ssr` line at the start of `"scripts"`, or null
+  /// when the result would not be the same JSON plus that one key
+  String? _insertScript(String text, Map<String, dynamic> original) {
+    RegExpMatch? match = RegExp(r'"scripts"\s*:\s*\{').firstMatch(text);
+    if (match == null) return null;
+    int end = match.end;
+    String space = RegExp(r'^\s*').stringMatch(text.substring(end))!;
+    bool empty = text.substring(end + space.length).startsWith('}');
+    String entry = '"build:ssr": ${jsonEncode(buildSsrScript)}';
+    String unit = RegExp(r'^[ \t]+', multiLine: true).stringMatch(text) ?? '  ';
+    String before = text.substring(0, end);
+    String after = text.substring(end + space.length);
+    String result;
+    if (space.contains('\n')) {
+      result = empty
+          ? '$before$space$unit$entry$space$after'
+          : '$before$space$entry,$space$after';
+    } else {
+      result = empty
+          ? '$before$entry$after'
+          : '$before$space$entry,${space.isEmpty ? '' : space}$after';
+    }
+    try {
+      Object? now = jsonDecode(result);
+      if (now is! Map<String, dynamic>) return null;
+      Object? added = (now['scripts'] as Map<String, dynamic>).remove(
+        'build:ssr',
+      );
+      if (added != buildSsrScript) return null;
+      return jsonEncode(now) == jsonEncode(original) ? result : null;
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
   }
 
   /// `resources/js/ssr.jsx`, the same as the docs show
