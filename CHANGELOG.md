@@ -1,3 +1,8 @@
+## Unreleased
+
+- New: `dox inertia:install --ssr` writes `resources/js/ssr.jsx` and adds the `build:ssr` script to `package.json`. It never overwrites a file, and it leaves a missing or broken `package.json` alone (it prints a hint instead). Without `--ssr` nothing changes.
+- New: `dox inertia:start-ssr` starts the SSR server from `bootstrap/ssr/ssr.js` (or `ssr.mjs`) with Bun, in the foreground. `--node` uses Node. It prints a clear message and exits with code 1 when the file is not built or the runtime is not installed.
+
 ## 3.2.2
 
 - Change: every log and warning line now starts with `[inertia]` (was `dox_inertia:`). Only the prefix changed.

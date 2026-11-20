@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dox_annotation/install.dart';
@@ -139,5 +140,66 @@ void main() {
       expect(snapshot(), before, reason: '$args');
       exitCode = 0;
     }
+  });
+
+  group('--ssr', () {
+    test('writes ssr.jsx and adds the build:ssr script', () async {
+      File('${root.path}/package.json').writeAsStringSync(
+        '{"name":"x","scripts":{"dev":"vite"},"type":"module"}',
+      );
+      await install(<String>['--ssr']);
+      expect(exitCode, 0);
+      expect(read('resources/js/ssr.jsx'), contains('createServer'));
+      Map<String, dynamic> json =
+          jsonDecode(read('package.json')) as Map<String, dynamic>;
+      expect(json.keys.toList(), <String>['name', 'scripts', 'type']);
+      Map<String, dynamic> scripts = json['scripts'] as Map<String, dynamic>;
+      expect(scripts.keys.toList(), <String>['dev', 'build:ssr']);
+      expect(scripts['build:ssr'], InertiaInstallCommand.buildSsrScript);
+      expect(read('package.json'), contains('\n  "name"'));
+    });
+
+    test('adds scripts when package.json has none', () async {
+      File('${root.path}/package.json').writeAsStringSync('{"name":"x"}');
+      await install(<String>['--ssr']);
+      expect(read('package.json'), contains('"build:ssr"'));
+    });
+
+    test('keeps an existing ssr.jsx and build:ssr', () async {
+      File('${root.path}/resources/js/ssr.jsx')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('mine');
+      String pkg = '{"scripts":{"build:ssr":"mine"}}';
+      File('${root.path}/package.json').writeAsStringSync(pkg);
+      await install(<String>['--ssr']);
+      expect(read('resources/js/ssr.jsx'), 'mine');
+      expect(read('package.json'), pkg);
+    });
+
+    test('no package.json: not created', () async {
+      await install(<String>['--ssr']);
+      expect(File('${root.path}/package.json').existsSync(), isFalse);
+      expect(read('resources/js/ssr.jsx'), isNotEmpty);
+      expect(exitCode, 0);
+    });
+
+    test('invalid package.json is not touched', () async {
+      File('${root.path}/package.json').writeAsStringSync('{ nope');
+      await install(<String>['--ssr']);
+      expect(read('package.json'), '{ nope');
+      expect(exitCode, 0);
+    });
+
+    test('without --ssr nothing SSR is written', () async {
+      await install(<String>[]);
+      expect(File('${root.path}/resources/js/ssr.jsx').existsSync(), isFalse);
+    });
+
+    test('unknown option is rejected', () async {
+      Map<String, String> before = snapshot();
+      await install(<String>['--ssr', '--foo']);
+      expect(exitCode, 1);
+      expect(snapshot(), before);
+    });
   });
 }

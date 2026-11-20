@@ -5,8 +5,13 @@ library;
 import 'package:dox_annotation/command.dart';
 
 import 'src/commands/inertia_install_command.dart';
+import 'src/commands/inertia_start_ssr_command.dart';
 
 export 'src/commands/inertia_install_command.dart';
+export 'src/commands/inertia_start_ssr_command.dart';
 
 /// every command of this package
-final List<Command> commands = <Command>[InertiaInstallCommand()];
+final List<Command> commands = <Command>[
+  InertiaInstallCommand(),
+  InertiaStartSsrCommand(),
+];
