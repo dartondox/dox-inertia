@@ -519,7 +519,17 @@ The page is rendered by the Inertia SSR server. It is a JavaScript process (Bun 
 
 ### 1. The SSR entry file
 
-`dox inertia:install --ssr` writes `resources/js/ssr.jsx` for you, and adds a `build:ssr` script to `package.json`. It never overwrites a file. With no `package.json` (or one it cannot change safely), it prints a hint instead. To write it yourself:
+`dox inertia:install --ssr` writes `resources/js/ssr.jsx` for you, and adds a `build:ssr` script to `package.json`. It never overwrites a file. With no `package.json` (or one it cannot change safely), it prints a hint instead.
+
+```json title="package.json"
+{
+  "scripts": {
+    "build:ssr": "vite build && vite build --ssr resources/js/ssr.jsx --outDir bootstrap/ssr"
+  }
+}
+```
+
+Without `--ssr`, add the `build:ssr` line to `scripts` yourself, and write the entry file like this:
 
 ```jsx
 import { createInertiaApp } from '@inertiajs/react'

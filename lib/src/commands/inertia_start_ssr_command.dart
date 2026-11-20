@@ -61,25 +61,50 @@ class InertiaStartSsrCommand extends Command {
         <StreamSubscription<ProcessSignal>>[];
     try {
       Process process = await (start ?? _start(base))(runtime, <String>[file]);
+      bool running = true;
+      bool signalled = false;
+
+      /// In a terminal, Ctrl+C already reaches the child through the process
+      /// group, so the child can get SIGINT twice. The forward is needed for
+      /// `docker stop`, where only PID 1 gets the signal. A second signal
+      /// kills a child that does not stop.
+      void forward(ProcessSignal signal) {
+        if (!running) return;
+        process.kill(signalled ? ProcessSignal.sigkill : signal);
+        signalled = true;
+      }
+
       for (ProcessSignal signal in <ProcessSignal>[
         ProcessSignal.sigint,
-        if (!Platform.isWindows) ProcessSignal.sigterm,
+        if (!Platform.isWindows) ...<ProcessSignal>[
+          ProcessSignal.sigterm,
+          ProcessSignal.sighup,
+        ],
       ]) {
-        subscriptions.add(
-          (signals ?? _watch)(signal).listen((ProcessSignal s) {
-            process.kill(s);
-          }),
+        subscriptions.add((signals ?? _watch)(signal).listen(forward));
+      }
+      int code = await process.exitCode;
+      running = false;
+
+      /// Dart gives -15 for a child ended by SIGTERM. A shell gives 143.
+      exitCode = code < 0 ? 128 - code : code;
+    } on ProcessException catch (e) {
+      bool missing =
+          e.errorCode == 2 ||
+          e.message.contains('No such file') ||
+          e.message.contains('not found');
+      if (!missing) {
+        print('Could not start $runtime: ${e.message}');
+      } else if (node) {
+        print(
+          'Node was not found. Install Node, or run without --node to use Bun.',
+        );
+      } else {
+        print(
+          'Bun was not found. Install Bun from https://bun.sh, or use '
+          '--node to run with Node.',
         );
       }
-      exitCode = await process.exitCode;
-    } on ProcessException {
-      print(
-        node
-            ? 'Node was not found. Install Node, or run without --node '
-                  'to use Bun.'
-            : 'Bun was not found. Install Bun from https://bun.sh, or use '
-                  '--node to run with Node.',
-      );
       exitCode = 1;
     } finally {
       for (StreamSubscription<ProcessSignal> sub in subscriptions) {

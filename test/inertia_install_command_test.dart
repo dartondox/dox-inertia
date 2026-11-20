@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -201,6 +202,35 @@ void main() {
       expect(
         (jsonDecode(out) as Map<String, dynamic>)['scripts'],
         contains('build:ssr'),
+      );
+    });
+
+    test('a nested scripts key before the real one is skipped', () async {
+      String out = await pkg(
+        '{"config":{"scripts":{"a":"b"}},"scripts":{"dev":"vite"}}',
+      );
+      Map<String, dynamic> json = jsonDecode(out) as Map<String, dynamic>;
+      expect(
+        (json['scripts'] as Map<String, dynamic>).keys,
+        contains('build:ssr'),
+      );
+      expect(json['config'], <String, dynamic>{
+        'scripts': <String, dynamic>{'a': 'b'},
+      });
+    });
+
+    test('script not added: the summary says to add it first', () async {
+      List<String> out = <String>[];
+      await runZoned(
+        () => install(<String>['--ssr']),
+        zoneSpecification: ZoneSpecification(
+          print: (Zone self, ZoneDelegate parent, Zone zone, String line) =>
+              out.add(line),
+        ),
+      );
+      expect(
+        out.join('\n'),
+        contains('Add this to `scripts` in package.json first'),
       );
     });
 

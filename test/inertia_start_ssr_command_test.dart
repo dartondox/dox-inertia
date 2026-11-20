@@ -46,12 +46,18 @@ void main() {
     File('${root.path}/bootstrap/ssr/$name').createSync(recursive: true);
   }
 
-  Future<void> start(List<String> args, {int code = 0, bool missing = false}) {
+  Future<void> start(
+    List<String> args, {
+    int code = 0,
+    ProcessException? fail,
+    bool missing = false,
+  }) {
     return InertiaStartSsrCommand(
       root: root,
       start: (String exe, List<String> a) async {
         started.add(<String>[exe, ...a]);
-        if (missing) throw ProcessException(exe, a, 'not found');
+        if (missing) throw ProcessException(exe, a, 'No such file', 2);
+        if (fail != null) throw fail;
         return FakeProcess(code);
       },
       signals: (ProcessSignal s) => const Stream<ProcessSignal>.empty(),
@@ -91,8 +97,11 @@ void main() {
     Future<void> run = InertiaStartSsrCommand(
       root: root,
       start: (String exe, List<String> a) async => child,
-      signals: (ProcessSignal s) =>
-          s == ProcessSignal.sigint ? int.stream : term.stream,
+      signals: (ProcessSignal s) => s == ProcessSignal.sigint
+          ? int.stream
+          : s == ProcessSignal.sigterm
+          ? term.stream
+          : const Stream<ProcessSignal>.empty(),
     ).run(<String>[]);
     await Future<void>.delayed(const Duration(milliseconds: 50));
     int.add(ProcessSignal.sigint);
@@ -102,7 +111,7 @@ void main() {
     await run;
     expect(child.killed.first, ProcessSignal.sigint);
     if (!Platform.isWindows) {
-      expect(child.killed.last, ProcessSignal.sigterm);
+      expect(child.killed.last, ProcessSignal.sigkill);
       expect(term.hasListener, isFalse);
     }
     expect(int.hasListener, isFalse);
@@ -138,5 +147,84 @@ void main() {
     await start(<String>['--node'], missing: true);
     expect(started.single.first, 'node');
     expect(exitCode, 1);
+  });
+
+  test('a child ended by a signal gives 128 + the signal', () async {
+    make('ssr.js');
+    await start(<String>[], code: -15);
+    expect(exitCode, 143);
+    await start(<String>[], code: -2);
+    expect(exitCode, 130);
+  });
+
+  test('another start error is not called "not found"', () async {
+    make('ssr.js');
+    await start(
+      <String>[],
+      fail: ProcessException('bun', <String>[], 'Permission denied', 13),
+    );
+    expect(exitCode, 1);
+  });
+
+  Future<
+    (
+      FakeProcess,
+      Map<ProcessSignal, StreamController<ProcessSignal>>,
+      Future<void>,
+    )
+  >
+  running() async {
+    make('ssr.js');
+    Map<ProcessSignal, StreamController<ProcessSignal>> sources =
+        <ProcessSignal, StreamController<ProcessSignal>>{};
+    FakeProcess child = FakeProcess(0, wait: true);
+    Future<void> done = InertiaStartSsrCommand(
+      root: root,
+      start: (String exe, List<String> a) async => child,
+      signals: (ProcessSignal s) =>
+          (sources[s] = StreamController<ProcessSignal>()).stream,
+    ).run(<String>[]);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    return (child, sources, done);
+  }
+
+  test('forwards SIGHUP, and a second signal sends SIGKILL', () async {
+    (
+      FakeProcess,
+      Map<ProcessSignal, StreamController<ProcessSignal>>,
+      Future<void>,
+    )
+    r = await running();
+    FakeProcess child = r.$1;
+    Map<ProcessSignal, StreamController<ProcessSignal>> sources = r.$2;
+    Future<void> done = r.$3;
+    if (!Platform.isWindows) {
+      sources[ProcessSignal.sighup]!.add(ProcessSignal.sighup);
+    }
+    sources[ProcessSignal.sigint]!.add(ProcessSignal.sigint);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(child.killed, <ProcessSignal>[
+      if (!Platform.isWindows) ProcessSignal.sighup else ProcessSignal.sigint,
+      ProcessSignal.sigkill,
+    ]);
+    child.done.complete(0);
+    await done;
+  });
+
+  test('a signal after the child ended does not kill or throw', () async {
+    (
+      FakeProcess,
+      Map<ProcessSignal, StreamController<ProcessSignal>>,
+      Future<void>,
+    )
+    r = await running();
+    FakeProcess child = r.$1;
+    Map<ProcessSignal, StreamController<ProcessSignal>> sources = r.$2;
+    Future<void> done = r.$3;
+    StreamController<ProcessSignal> c = sources[ProcessSignal.sigint]!;
+    child.done.complete(0);
+    await done;
+    expect(c.hasListener, isFalse);
+    expect(child.killed, isEmpty);
   });
 }
