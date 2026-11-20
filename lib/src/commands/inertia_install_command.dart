@@ -37,6 +37,17 @@ class InertiaInstallCommand extends Command {
     }
     bool ssr = args.contains('--ssr');
     Installer installer = Installer(root: root, runner: runner);
+    String? skipSsr;
+    if (ssr && !_isReact(installer.root)) {
+      ssr = false;
+      skipSsr =
+          'SSR scaffolding supports React only. No SSR file was written. '
+          'For Vue or Svelte, set up SSR by hand: $docsUrl';
+      print(skipSsr);
+    }
+    _ext = File('${installer.root.path}/resources/js/app.tsx').existsSync()
+        ? 'tsx'
+        : 'jsx';
     String app = installer.appName;
 
     /// first, so an app without the AppEnv class gets the hint and
@@ -62,7 +73,7 @@ class InertiaInstallCommand extends Command {
 
     bool scriptReady = true;
     if (ssr) {
-      installer.writeFile('resources/js/ssr.jsx', ssrEntry);
+      installer.writeFile('resources/js/ssr.$_ext', ssrEntryFor(_ext));
       scriptReady = addBuildScript(installer);
     }
 
@@ -75,13 +86,16 @@ class InertiaInstallCommand extends Command {
           'lib/config/inertia.dart if yours is another file.',
       "Render a page: `return inertia(req, 'Home', <String, dynamic>{});`.",
       'In production, serve public/build at /build/.',
+      ?skipSsr,
       if (ssr) ...<String>[
+        'SSR scaffolding is for React and `@inertiajs/react` 3.1.0 or newer '
+            '(the `host` option needs it).',
         'Set `ssr: InertiaSsr()` in lib/config/inertia.dart.',
-        'In resources/js/app.jsx, use `hydrateRoot` in `setup` when '
+        'In resources/js/app.$_ext, use `hydrateRoot` in `setup` when '
             "`el.hasAttribute('data-server-rendered')`. See the SSR docs.",
         if (!scriptReady)
           'Add this to `scripts` in package.json first: '
-              '"build:ssr": "$buildSsrScript"',
+              '"build:ssr": "$_script"',
         'Build with `bun run build:ssr` (or `npm run build:ssr` with Node). '
             'Then start the SSR server with `dox inertia:start-ssr` '
             '(`--node` runs it with Node).',
@@ -89,10 +103,40 @@ class InertiaInstallCommand extends Command {
     ]);
   }
 
+  static const String docsUrl =
+      'https://dartondox.dev/the-basic/inertia/#server-side-rendering-ssr';
+
+  /// `jsx`, or `tsx` when the app entry is resources/js/app.tsx
+  String _ext = 'jsx';
+
+  /// false only when package.json lists the Vue or Svelte client and not
+  /// the React one. No package.json or no client listed: React, as before.
+  bool _isReact(Directory folder) {
+    File file = File('${folder.path}/package.json');
+    if (!file.existsSync()) return true;
+    Object? json;
+    try {
+      json = jsonDecode(file.readAsStringSync());
+    } on FormatException {
+      return true;
+    }
+    if (json is! Map<String, dynamic>) return true;
+    Set<String> deps = <String>{};
+    for (String key in <String>['dependencies', 'devDependencies']) {
+      Object? map = json[key];
+      if (map is Map<String, dynamic>) deps.addAll(map.keys);
+    }
+    if (deps.contains('@inertiajs/react')) return true;
+    return !deps.contains('@inertiajs/vue3') &&
+        !deps.contains('@inertiajs/svelte');
+  }
+
   /// the `build:ssr` script of the docs
   static const String buildSsrScript =
       'vite build && vite build --ssr resources/js/ssr.jsx '
       '--outDir bootstrap/ssr';
+
+  String get _script => buildSsrScript.replaceAll('ssr.jsx', 'ssr.$_ext');
 
   /// adds `build:ssr` to the `scripts` of package.json. The line is put in
   /// as text, so the indent, the line ends and the other keys stay as they
@@ -102,7 +146,7 @@ class InertiaInstallCommand extends Command {
     File file = File('${installer.root.path}/package.json');
     if (!file.existsSync()) {
       installer.note('skipped  package.json (not there)');
-      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
+      installer.note('hint     add "build:ssr": "$_script" to scripts');
       return false;
     }
     String text = file.readAsStringSync();
@@ -122,7 +166,7 @@ class InertiaInstallCommand extends Command {
         : null;
     if (changed == null) {
       installer.note('skipped  package.json (could not add build:ssr)');
-      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
+      installer.note('hint     add "build:ssr": "$_script" to scripts');
       return false;
     }
     file.writeAsStringSync(changed);
@@ -143,7 +187,7 @@ class InertiaInstallCommand extends Command {
   String? _insertAt(String text, int end, Map<String, dynamic> original) {
     String space = RegExp(r'^\s*').stringMatch(text.substring(end))!;
     bool empty = text.substring(end + space.length).startsWith('}');
-    String entry = '"build:ssr": ${jsonEncode(buildSsrScript)}';
+    String entry = '"build:ssr": ${jsonEncode(_script)}';
     String unit = RegExp(r'^[ \t]+', multiLine: true).stringMatch(text) ?? '  ';
     String before = text.substring(0, end);
     String after = text.substring(end + space.length);
@@ -163,7 +207,7 @@ class InertiaInstallCommand extends Command {
       Object? added = (now['scripts'] as Map<String, dynamic>).remove(
         'build:ssr',
       );
-      if (added != buildSsrScript) return null;
+      if (added != _script) return null;
       return jsonEncode(now) == jsonEncode(original) ? result : null;
     } on FormatException {
       return null;
@@ -171,6 +215,9 @@ class InertiaInstallCommand extends Command {
       return null;
     }
   }
+
+  /// `resources/js/ssr.tsx` for a TypeScript app, else `ssr.jsx`
+  static String ssrEntryFor(String ext) => ssrEntry.replaceAll('.jsx', '.$ext');
 
   /// `resources/js/ssr.jsx`, the same as the docs show
   static const String ssrEntry = '''
