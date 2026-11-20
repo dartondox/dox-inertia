@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dox_annotation/command.dart';
@@ -7,6 +8,9 @@ import 'package:dox_annotation/install.dart';
 /// side of Inertia in an app: the config, the provider and the root view.
 /// It does not make the JavaScript front-end. It never overwrites a file,
 /// so it is safe to run twice.
+///
+/// `--ssr` also adds the SSR entry file and the `build:ssr` script. Then
+/// `dox inertia:start-ssr` runs the SSR server.
 class InertiaInstallCommand extends Command {
   /// [root] is the app folder (the current folder by default). [runner]
   /// runs `dart`, tests pass a fake one.
@@ -22,15 +26,16 @@ class InertiaInstallCommand extends Command {
   String get description => 'Set up the server side of Inertia in this app';
 
   @override
-  String get usage => 'inertia:install';
+  String get usage => 'inertia:install [--ssr]';
 
   @override
   Future<void> run(List<String> args) async {
-    if (args.isNotEmpty) {
-      print('Unknown option. inertia:install has no options.');
+    if (args.any((String a) => a != '--ssr')) {
+      print('Unknown option. inertia:install only has --ssr.');
       exitCode = 1;
       return;
     }
+    bool ssr = args.contains('--ssr');
     Installer installer = Installer(root: root, runner: runner);
     String app = installer.appName;
 
@@ -55,6 +60,12 @@ class InertiaInstallCommand extends Command {
     installer.writeFile('lib/providers/inertia_provider.dart', provider(app));
     installer.writeFile('resources/views/app.html', rootView);
 
+    bool scriptReady = true;
+    if (ssr) {
+      installer.writeFile('resources/js/ssr.jsx', ssrEntry);
+      scriptReady = addBuildScript(installer);
+    }
+
     await installer.buildRunner();
     installer.printSummary(<String>[
       'Add `SessionMiddleware`, `CsrfMiddleware` and an `InertiaMiddleware` '
@@ -64,8 +75,123 @@ class InertiaInstallCommand extends Command {
           'lib/config/inertia.dart if yours is another file.',
       "Render a page: `return inertia(req, 'Home', <String, dynamic>{});`.",
       'In production, serve public/build at /build/.',
+      if (ssr) ...<String>[
+        'Set `ssr: InertiaSsr()` in lib/config/inertia.dart.',
+        'In resources/js/app.jsx, use `hydrateRoot` in `setup` when '
+            "`el.hasAttribute('data-server-rendered')`. See the SSR docs.",
+        if (!scriptReady)
+          'Add this to `scripts` in package.json first: '
+              '"build:ssr": "$buildSsrScript"',
+        'Build with `bun run build:ssr` (or `npm run build:ssr` with Node). '
+            'Then start the SSR server with `dox inertia:start-ssr` '
+            '(`--node` runs it with Node).',
+      ],
     ]);
   }
+
+  /// the `build:ssr` script of the docs
+  static const String buildSsrScript =
+      'vite build && vite build --ssr resources/js/ssr.jsx '
+      '--outDir bootstrap/ssr';
+
+  /// adds `build:ssr` to the `scripts` of package.json. The line is put in
+  /// as text, so the indent, the line ends and the other keys stay as they
+  /// are. When this cannot be done safely, nothing is changed and a hint is
+  /// printed. Returns true when the script is in package.json at the end.
+  bool addBuildScript(Installer installer) {
+    File file = File('${installer.root.path}/package.json');
+    if (!file.existsSync()) {
+      installer.note('skipped  package.json (not there)');
+      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
+      return false;
+    }
+    String text = file.readAsStringSync();
+    Object? json;
+    try {
+      json = jsonDecode(text);
+    } on FormatException {
+      json = null;
+    }
+    Object? scripts = json is Map<String, dynamic> ? json['scripts'] : null;
+    if (scripts is Map<String, dynamic> && scripts.containsKey('build:ssr')) {
+      installer.note('skipped  package.json build:ssr (already there)');
+      return true;
+    }
+    String? changed = scripts is Map<String, dynamic>
+        ? _insertScript(text, json as Map<String, dynamic>)
+        : null;
+    if (changed == null) {
+      installer.note('skipped  package.json (could not add build:ssr)');
+      installer.note('hint     add "build:ssr": "$buildSsrScript" to scripts');
+      return false;
+    }
+    file.writeAsStringSync(changed);
+    installer.note('added    build:ssr to package.json');
+    return true;
+  }
+
+  /// [text] with the `build:ssr` line at the start of `"scripts"`, or null
+  /// when the result would not be the same JSON plus that one key
+  String? _insertScript(String text, Map<String, dynamic> original) {
+    for (RegExpMatch match in RegExp(r'"scripts"\s*:\s*\{').allMatches(text)) {
+      String? result = _insertAt(text, match.end, original);
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  String? _insertAt(String text, int end, Map<String, dynamic> original) {
+    String space = RegExp(r'^\s*').stringMatch(text.substring(end))!;
+    bool empty = text.substring(end + space.length).startsWith('}');
+    String entry = '"build:ssr": ${jsonEncode(buildSsrScript)}';
+    String unit = RegExp(r'^[ \t]+', multiLine: true).stringMatch(text) ?? '  ';
+    String before = text.substring(0, end);
+    String after = text.substring(end + space.length);
+    String result;
+    if (space.contains('\n')) {
+      result = empty
+          ? '$before$space$unit$entry$space$after'
+          : '$before$space$entry,$space$after';
+    } else {
+      result = empty
+          ? '$before$entry$after'
+          : '$before$space$entry,${space.isEmpty ? '' : space}$after';
+    }
+    try {
+      Object? now = jsonDecode(result);
+      if (now is! Map<String, dynamic>) return null;
+      Object? added = (now['scripts'] as Map<String, dynamic>).remove(
+        'build:ssr',
+      );
+      if (added != buildSsrScript) return null;
+      return jsonEncode(now) == jsonEncode(original) ? result : null;
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
+  }
+
+  /// `resources/js/ssr.jsx`, the same as the docs show
+  static const String ssrEntry = '''
+import { createInertiaApp } from '@inertiajs/react'
+import createServer from '@inertiajs/react/server'
+import ReactDOMServer from 'react-dom/server'
+
+createServer(
+  (page) =>
+    createInertiaApp({
+      page,
+      render: ReactDOMServer.renderToString,
+      resolve: (name) => {
+        const pages = import.meta.glob('./Pages/**/*.jsx', { eager: true })
+        return pages[`./Pages/\${name}.jsx`]
+      },
+      setup: ({ App, props }) => <App {...props} />,
+    }),
+  { host: '127.0.0.1' },
+)
+''';
 
   /// the getters of `AppEnv` that `lib/config/inertia.dart` reads
   static const List<String> envGetters = <String>[

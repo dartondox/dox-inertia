@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dox_annotation/install.dart';
@@ -139,5 +141,139 @@ void main() {
       expect(snapshot(), before, reason: '$args');
       exitCode = 0;
     }
+  });
+
+  group('--ssr', () {
+    test('writes ssr.jsx and adds the build:ssr script', () async {
+      File('${root.path}/package.json').writeAsStringSync(
+        '{"name":"x","scripts":{"dev":"vite"},"type":"module"}',
+      );
+      await install(<String>['--ssr']);
+      expect(exitCode, 0);
+      expect(read('resources/js/ssr.jsx'), contains('createServer'));
+      Map<String, dynamic> json =
+          jsonDecode(read('package.json')) as Map<String, dynamic>;
+      expect(json.keys.toList(), <String>['name', 'scripts', 'type']);
+      Map<String, dynamic> scripts = json['scripts'] as Map<String, dynamic>;
+      expect(scripts.keys.toList(), <String>['build:ssr', 'dev']);
+      expect(scripts['build:ssr'], InertiaInstallCommand.buildSsrScript);
+      expect(read('package.json'), startsWith('{"name":"x","scripts":{'));
+    });
+
+    Future<String> pkg(String text) async {
+      File('${root.path}/package.json').writeAsStringSync(text);
+      await install(<String>['--ssr']);
+      jsonDecode(read('package.json'));
+      return read('package.json');
+    }
+
+    test('keeps 4 space indent, CRLF and the trailing newline', () async {
+      String out = await pkg(
+        '{\r\n    "name": "x",\r\n    "files": ["a", "b"],\r\n'
+        '    "scripts": {\r\n        "dev": "vite"\r\n    }\r\n}\r\n',
+      );
+      expect(out, contains('        "build:ssr": '));
+      expect(out, contains('["a", "b"]'));
+      expect(out, contains('\r\n        "dev": "vite"\r\n    }\r\n}\r\n'));
+      expect(out.contains(RegExp(r'[^\r]\n')), isFalse);
+    });
+
+    test('keeps tab indent', () async {
+      String out = await pkg('{\n\t"scripts": {\n\t\t"dev": "vite"\n\t}\n}\n');
+      expect(out, contains('\n\t\t"build:ssr": '));
+      expect(out, endsWith('\n\t}\n}\n'));
+    });
+
+    test('works with an empty scripts object', () async {
+      String out = await pkg('{\n  "scripts": {}\n}\n');
+      expect(out, contains('"scripts": {"build:ssr": '));
+      expect(out, endsWith('}\n}\n'));
+    });
+
+    test('works with an empty scripts object on many lines', () async {
+      String out = await pkg('{\n  "scripts": {\n  }\n}\n');
+      expect(out, contains('{\n    "build:ssr": '));
+      expect(out, endsWith('\n  }\n}\n'));
+    });
+
+    test('keeps a file with no trailing newline as it is', () async {
+      String out = await pkg('{"scripts":{"dev":"vite"}}');
+      expect(out.endsWith('}}'), isTrue);
+      expect(
+        (jsonDecode(out) as Map<String, dynamic>)['scripts'],
+        contains('build:ssr'),
+      );
+    });
+
+    test('a nested scripts key before the real one is skipped', () async {
+      String out = await pkg(
+        '{"config":{"scripts":{"a":"b"}},"scripts":{"dev":"vite"}}',
+      );
+      Map<String, dynamic> json = jsonDecode(out) as Map<String, dynamic>;
+      expect(
+        (json['scripts'] as Map<String, dynamic>).keys,
+        contains('build:ssr'),
+      );
+      expect(json['config'], <String, dynamic>{
+        'scripts': <String, dynamic>{'a': 'b'},
+      });
+    });
+
+    test('script not added: the summary says to add it first', () async {
+      List<String> out = <String>[];
+      await runZoned(
+        () => install(<String>['--ssr']),
+        zoneSpecification: ZoneSpecification(
+          print: (Zone self, ZoneDelegate parent, Zone zone, String line) =>
+              out.add(line),
+        ),
+      );
+      expect(
+        out.join('\n'),
+        contains('Add this to `scripts` in package.json first'),
+      );
+    });
+
+    test('no scripts object: file kept, hint only', () async {
+      String text = '{\n  "name": "x"\n}\n';
+      expect(await pkg(text), text);
+    });
+
+    test('keeps an existing ssr.jsx and build:ssr', () async {
+      File('${root.path}/resources/js/ssr.jsx')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('mine');
+      String pkg = '{"scripts":{"build:ssr":"mine"}}';
+      File('${root.path}/package.json').writeAsStringSync(pkg);
+      await install(<String>['--ssr']);
+      expect(read('resources/js/ssr.jsx'), 'mine');
+      expect(read('package.json'), pkg);
+    });
+
+    test('no package.json: not created', () async {
+      await install(<String>['--ssr']);
+      expect(File('${root.path}/package.json').existsSync(), isFalse);
+      expect(read('resources/js/ssr.jsx'), isNotEmpty);
+      expect(exitCode, 0);
+    });
+
+    test('invalid package.json is not touched', () async {
+      File('${root.path}/package.json').writeAsStringSync('{ nope');
+      await install(<String>['--ssr']);
+      expect(read('package.json'), '{ nope');
+      expect(exitCode, 0);
+    });
+
+    test('without --ssr nothing SSR is written', () async {
+      await install(<String>[]);
+      expect(File('${root.path}/resources/js/ssr.jsx').existsSync(), isFalse);
+    });
+
+    test('unknown option is rejected', () async {
+      Map<String, String> before = snapshot();
+      await install(<String>['--ssr', '--foo']);
+      expect(exitCode, 1);
+      expect(snapshot(), before);
+    });
   });
 }
