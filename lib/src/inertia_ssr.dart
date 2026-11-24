@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dox_http_client/http.dart';
 import 'package:http/http.dart' as http;
 
 /// Server side rendering (SSR). Dox sends the page to the Inertia SSR
@@ -92,7 +93,7 @@ class InertiaSsr {
 
   Future<http.Response> _send(http.BaseRequest request) async {
     return http.Response.fromStream(
-      await (_client ??= http.Client()).send(request),
+      await (_client ??= DoxHttpPackageClient()).send(request),
     );
   }
 

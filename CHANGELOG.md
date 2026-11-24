@@ -1,3 +1,7 @@
+## Unreleased
+
+- Faster: SSR sends the page to the SSR server through the native client of [dox_http_client](https://pub.dev/packages/dox_http_client).
+
 ## 3.2.3
 
 - New: `dox inertia:install --ssr` writes `resources/js/ssr.jsx` and adds the `build:ssr` script to `package.json`. It never overwrites a file, and it leaves a missing or broken `package.json` alone (it prints a hint instead). Without `--ssr` nothing changes.
