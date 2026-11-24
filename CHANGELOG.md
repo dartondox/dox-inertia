@@ -1,4 +1,4 @@
-## Unreleased
+## 3.2.4
 
 - Faster: SSR sends the page to the SSR server through the native client of [dox_http_client](https://pub.dev/packages/dox_http_client).
 
